@@ -1,4 +1,9 @@
 export class MMU {
+  _inbios;
+
+  constructor() {
+    this._inbios = 0;
+  }
   rb(addr: number): number {
     return 0;
   }

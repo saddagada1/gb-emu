@@ -1,14 +1,14 @@
-import { BitIndex, GeneralPurposeRegister } from "./types";
+import { BitIndex, GeneralPurposeRegister, Ops } from "./types";
 import { MMU } from "./MMU";
 import { BitIndexToHex } from "./constants";
 
-class CPU {
+export class CPU {
   _clock;
   _r;
   _halt;
   _stop;
-  _map: Function[];
-  _cbmap: Function[];
+  _map: Ops;
+  _cbmap: Ops;
   _MMU;
 
   constructor() {
@@ -32,8 +32,586 @@ class CPU {
     };
     this._halt = 0;
     this._stop = 0;
-    this._map = [];
-    this._cbmap = [];
+    this._map = {
+      0: [
+        this.NOP,
+        this.LDrr_nn.bind(this, "b", "c"),
+        this.LDBC_A,
+        this.INCrr.bind(this, "b", "c"),
+        this.INCr.bind(this, "b"),
+        this.DECr.bind(this, "b"),
+        this.LDrn.bind(this, "b"),
+        this.RLCA,
+        this.LDnn_SP,
+        this.ADD_HLrr.bind(this, "b", "c"),
+        this.LDA_BC,
+        this.DECrr.bind(this, "b", "c"),
+        this.INCr.bind(this, "c"),
+        this.DECr.bind(this, "c"),
+        this.LDrn.bind(this, "c"),
+        this.RRCA,
+      ],
+      1: [
+        this.STOP,
+        this.LDrr_nn.bind(this, "d", "e"),
+        this.LDDE_A,
+        this.INCrr.bind(this, "d", "e"),
+        this.INCr.bind(this, "d"),
+        this.DECr.bind(this, "d"),
+        this.LDrn.bind(this, "d"),
+        this.RLA,
+        this.JRe,
+        this.ADD_HLrr.bind(this, "d", "e"),
+        this.LDA_DE,
+        this.DECrr.bind(this, "d", "e"),
+        this.INCr.bind(this, "e"),
+        this.DECr.bind(this, "e"),
+        this.LDrn.bind(this, "e"),
+        this.RRA,
+      ],
+      2: [
+        this.JRNZ_e,
+        this.LDrr_nn.bind(this, "h", "l"),
+        this.LDHLI_A,
+        this.INCrr.bind(this, "h", "l"),
+        this.INCr.bind(this, "h"),
+        this.DECr.bind(this, "h"),
+        this.LDrn.bind(this, "h"),
+        this.DAA,
+        this.JRZ_e,
+        this.ADD_HLrr.bind(this, "h", "l"),
+        this.LDA_HLI,
+        this.DECrr.bind(this, "h", "l"),
+        this.INCr.bind(this, "l"),
+        this.DECr.bind(this, "l"),
+        this.LDrn.bind(this, "l"),
+        this.CPL,
+      ],
+      3: [
+        this.JRNC_e,
+        this.LDSP_nn,
+        this.LDHLD_A,
+        this.INC_SP,
+        this.INC_HL,
+        this.DEC_HL,
+        this.LDHLn,
+        this.SCF,
+        this.JRC_e,
+        this.ADDHL_SP,
+        this.LDA_HLD,
+        this.DEC_SP,
+        this.INCr.bind(this, "a"),
+        this.DECr.bind(this, "a"),
+        this.LDrn.bind(this, "a"),
+        this.CCF,
+      ],
+      4: [
+        this.LDrr.bind(this, "b", "b"),
+        this.LDrr.bind(this, "b", "c"),
+        this.LDrr.bind(this, "b", "d"),
+        this.LDrr.bind(this, "b", "e"),
+        this.LDrr.bind(this, "b", "h"),
+        this.LDrr.bind(this, "b", "l"),
+        this.LDrHL.bind(this, "b"),
+        this.LDrr.bind(this, "b", "a"),
+        this.LDrr.bind(this, "c", "b"),
+        this.LDrr.bind(this, "c", "c"),
+        this.LDrr.bind(this, "c", "d"),
+        this.LDrr.bind(this, "c", "e"),
+        this.LDrr.bind(this, "c", "h"),
+        this.LDrr.bind(this, "c", "l"),
+        this.LDrHL.bind(this, "c"),
+        this.LDrr.bind(this, "c", "a"),
+      ],
+      5: [
+        this.LDrr.bind(this, "d", "b"),
+        this.LDrr.bind(this, "d", "c"),
+        this.LDrr.bind(this, "d", "d"),
+        this.LDrr.bind(this, "d", "e"),
+        this.LDrr.bind(this, "d", "h"),
+        this.LDrr.bind(this, "d", "l"),
+        this.LDrHL.bind(this, "d"),
+        this.LDrr.bind(this, "d", "a"),
+        this.LDrr.bind(this, "e", "b"),
+        this.LDrr.bind(this, "e", "c"),
+        this.LDrr.bind(this, "e", "d"),
+        this.LDrr.bind(this, "e", "e"),
+        this.LDrr.bind(this, "e", "h"),
+        this.LDrr.bind(this, "e", "l"),
+        this.LDrHL.bind(this, "e"),
+        this.LDrr.bind(this, "e", "a"),
+      ],
+      6: [
+        this.LDrr.bind(this, "h", "b"),
+        this.LDrr.bind(this, "h", "c"),
+        this.LDrr.bind(this, "h", "d"),
+        this.LDrr.bind(this, "h", "e"),
+        this.LDrr.bind(this, "h", "h"),
+        this.LDrr.bind(this, "h", "l"),
+        this.LDrHL.bind(this, "h"),
+        this.LDrr.bind(this, "h", "a"),
+        this.LDrr.bind(this, "l", "b"),
+        this.LDrr.bind(this, "l", "c"),
+        this.LDrr.bind(this, "l", "d"),
+        this.LDrr.bind(this, "l", "e"),
+        this.LDrr.bind(this, "l", "h"),
+        this.LDrr.bind(this, "l", "l"),
+        this.LDrHL.bind(this, "l"),
+        this.LDrr.bind(this, "l", "a"),
+      ],
+      7: [
+        this.LDHLr.bind(this, "b"),
+        this.LDHLr.bind(this, "c"),
+        this.LDHLr.bind(this, "d"),
+        this.LDHLr.bind(this, "e"),
+        this.LDHLr.bind(this, "h"),
+        this.LDHLr.bind(this, "l"),
+        this.HALT,
+        this.LDHLr.bind(this, "a"),
+        this.LDrr.bind(this, "a", "b"),
+        this.LDrr.bind(this, "a", "c"),
+        this.LDrr.bind(this, "a", "d"),
+        this.LDrr.bind(this, "a", "e"),
+        this.LDrr.bind(this, "a", "h"),
+        this.LDrr.bind(this, "a", "l"),
+        this.LDrHL.bind(this, "a"),
+        this.LDrr.bind(this, "a", "a"),
+      ],
+      8: [
+        this.ADDr.bind(this, "b"),
+        this.ADDr.bind(this, "c"),
+        this.ADDr.bind(this, "d"),
+        this.ADDr.bind(this, "e"),
+        this.ADDr.bind(this, "h"),
+        this.ADDr.bind(this, "l"),
+        this.ADD_HL,
+        this.ADDr.bind(this, "a"),
+        this.ADCr.bind(this, "b"),
+        this.ADCr.bind(this, "c"),
+        this.ADCr.bind(this, "d"),
+        this.ADCr.bind(this, "e"),
+        this.ADCr.bind(this, "h"),
+        this.ADCr.bind(this, "l"),
+        this.ADC_HL,
+        this.ADCr.bind(this, "a"),
+      ],
+      9: [
+        this.SUBr.bind(this, "b"),
+        this.SUBr.bind(this, "c"),
+        this.SUBr.bind(this, "d"),
+        this.SUBr.bind(this, "e"),
+        this.SUBr.bind(this, "h"),
+        this.SUBr.bind(this, "l"),
+        this.SUB_HL,
+        this.SUBr.bind(this, "a"),
+        this.SBCr.bind(this, "b"),
+        this.SBCr.bind(this, "c"),
+        this.SBCr.bind(this, "d"),
+        this.SBCr.bind(this, "e"),
+        this.SBCr.bind(this, "h"),
+        this.SBCr.bind(this, "l"),
+        this.SBC_HL,
+        this.SBCr.bind(this, "a"),
+      ],
+      10: [
+        this.ANDr.bind(this, "b"),
+        this.ANDr.bind(this, "c"),
+        this.ANDr.bind(this, "d"),
+        this.ANDr.bind(this, "e"),
+        this.ANDr.bind(this, "h"),
+        this.ANDr.bind(this, "l"),
+        this.AND_HL,
+        this.ANDr.bind(this, "a"),
+        this.XORr.bind(this, "b"),
+        this.XORr.bind(this, "c"),
+        this.XORr.bind(this, "d"),
+        this.XORr.bind(this, "e"),
+        this.XORr.bind(this, "h"),
+        this.XORr.bind(this, "l"),
+        this.XOR_HL,
+        this.XORr.bind(this, "a"),
+      ],
+      11: [
+        this.ORr.bind(this, "b"),
+        this.ORr.bind(this, "c"),
+        this.ORr.bind(this, "d"),
+        this.ORr.bind(this, "e"),
+        this.ORr.bind(this, "h"),
+        this.ORr.bind(this, "l"),
+        this.OR_HL,
+        this.ORr.bind(this, "a"),
+        this.CPr.bind(this, "b"),
+        this.CPr.bind(this, "c"),
+        this.CPr.bind(this, "d"),
+        this.CPr.bind(this, "e"),
+        this.CPr.bind(this, "h"),
+        this.CPr.bind(this, "l"),
+        this.CP_HL,
+        this.CPr.bind(this, "a"),
+      ],
+      12: [
+        this.RETNZ,
+        this.POPrr.bind(this, "b", "c"),
+        this.JPNZ_nn,
+        this.JPnn,
+        this.CALLNZ_nn,
+        this.PUSHrr.bind(this, "b", "c"),
+        this.ADDn,
+        this.RST_N.bind(this, 0x00),
+        this.RETZ,
+        this.RET,
+        this.JPZ_nn,
+        this.mapCb,
+        this.CALLZ_nn,
+        this.CALLnn,
+        this.ADCn,
+        this.RST_N.bind(this, 0x08),
+      ],
+      13: [
+        this.RETNC,
+        this.POPrr.bind(this, "d", "e"),
+        this.JPNC_nn,
+        this.xx,
+        this.CALLNC_nn,
+        this.PUSHrr.bind(this, "d", "e"),
+        this.SUBn,
+        this.RST_N.bind(this, 0x10),
+        this.RETC,
+        this.RETI,
+        this.JPC_nn,
+        this.xx,
+        this.CALLC_nn,
+        this.xx,
+        this.SBCn,
+        this.RST_N.bind(this, 0x18),
+      ],
+      14: [
+        this.LDFFn_A,
+        this.POPrr.bind(this, "h", "l"),
+        this.LDFFC_A,
+        this.xx,
+        this.xx,
+        this.PUSHrr.bind(this, "h", "l"),
+        this.ANDn,
+        this.RST_N.bind(this, 0x20),
+        this.ADDSP_e,
+        this.JP_HL,
+        this.LDnnA,
+        this.xx,
+        this.xx,
+        this.xx,
+        this.XORn,
+        this.RST_N.bind(this, 0x28),
+      ],
+      15: [
+        this.LDA_FFn,
+        this.POPrr.bind(this, "a", "f"),
+        this.LDA_FFC,
+        this.DI,
+        this.xx,
+        this.PUSHrr.bind(this, "a", "f"),
+        this.ORn,
+        this.RST_N.bind(this, 0x30),
+        this.LDHL_SPe,
+        this.LDSP_HL,
+        this.LDAnn,
+        this.EI,
+        this.xx,
+        this.xx,
+        this.CPn,
+        this.RST_N.bind(this, 0x38),
+      ],
+    };
+    this._cbmap = {
+      0: [
+        this.RLCr.bind(this, "b"),
+        this.RLCr.bind(this, "c"),
+        this.RLCr.bind(this, "d"),
+        this.RLCr.bind(this, "e"),
+        this.RLCr.bind(this, "h"),
+        this.RLCr.bind(this, "l"),
+        this.RLC_HL,
+        this.RLCr.bind(this, "a"),
+        this.RRCr.bind(this, "b"),
+        this.RRCr.bind(this, "c"),
+        this.RRCr.bind(this, "d"),
+        this.RRCr.bind(this, "e"),
+        this.RRCr.bind(this, "h"),
+        this.RRCr.bind(this, "l"),
+        this.RRC_HL,
+        this.RRCr.bind(this, "a"),
+      ],
+      1: [
+        this.RLr.bind(this, "b"),
+        this.RLr.bind(this, "c"),
+        this.RLr.bind(this, "d"),
+        this.RLr.bind(this, "e"),
+        this.RLr.bind(this, "h"),
+        this.RLr.bind(this, "l"),
+        this.RL_HL,
+        this.RLr.bind(this, "a"),
+        this.RRr.bind(this, "b"),
+        this.RRr.bind(this, "c"),
+        this.RRr.bind(this, "d"),
+        this.RRr.bind(this, "e"),
+        this.RRr.bind(this, "h"),
+        this.RRr.bind(this, "l"),
+        this.RR_HL,
+        this.RRr.bind(this, "a"),
+      ],
+      2: [
+        this.SLAr.bind(this, "b"),
+        this.SLAr.bind(this, "c"),
+        this.SLAr.bind(this, "d"),
+        this.SLAr.bind(this, "e"),
+        this.SLAr.bind(this, "h"),
+        this.SLAr.bind(this, "l"),
+        this.SLA_HL,
+        this.SLAr.bind(this, "a"),
+        this.SRAr.bind(this, "b"),
+        this.SRAr.bind(this, "c"),
+        this.SRAr.bind(this, "d"),
+        this.SRAr.bind(this, "e"),
+        this.SRAr.bind(this, "h"),
+        this.SRAr.bind(this, "l"),
+        this.SRA_HL,
+        this.SRAr.bind(this, "a"),
+      ],
+      3: [
+        this.SWAPr.bind(this, "b"),
+        this.SWAPr.bind(this, "c"),
+        this.SWAPr.bind(this, "d"),
+        this.SWAPr.bind(this, "e"),
+        this.SWAPr.bind(this, "h"),
+        this.SWAPr.bind(this, "l"),
+        this.SWAP_HL,
+        this.SWAPr.bind(this, "a"),
+        this.SRLr.bind(this, "b"),
+        this.SRLr.bind(this, "c"),
+        this.SRLr.bind(this, "d"),
+        this.SRLr.bind(this, "e"),
+        this.SRLr.bind(this, "h"),
+        this.SRLr.bind(this, "l"),
+        this.SRL_HL,
+        this.SRLr.bind(this, "a"),
+      ],
+      4: [
+        this.BITbr.bind(this, 0, "b"),
+        this.BITbr.bind(this, 0, "c"),
+        this.BITbr.bind(this, 0, "d"),
+        this.BITbr.bind(this, 0, "e"),
+        this.BITbr.bind(this, 0, "h"),
+        this.BITbr.bind(this, 0, "l"),
+        this.BITb_HL.bind(this, 0),
+        this.BITbr.bind(this, 0, "a"),
+        this.BITbr.bind(this, 1, "b"),
+        this.BITbr.bind(this, 1, "c"),
+        this.BITbr.bind(this, 1, "d"),
+        this.BITbr.bind(this, 1, "e"),
+        this.BITbr.bind(this, 1, "h"),
+        this.BITbr.bind(this, 1, "l"),
+        this.BITb_HL.bind(this, 1),
+        this.BITbr.bind(this, 1, "a"),
+      ],
+      5: [
+        this.BITbr.bind(this, 2, "b"),
+        this.BITbr.bind(this, 2, "c"),
+        this.BITbr.bind(this, 2, "d"),
+        this.BITbr.bind(this, 2, "e"),
+        this.BITbr.bind(this, 2, "h"),
+        this.BITbr.bind(this, 2, "l"),
+        this.BITb_HL.bind(this, 2),
+        this.BITbr.bind(this, 2, "a"),
+        this.BITbr.bind(this, 3, "b"),
+        this.BITbr.bind(this, 3, "c"),
+        this.BITbr.bind(this, 3, "d"),
+        this.BITbr.bind(this, 3, "e"),
+        this.BITbr.bind(this, 3, "h"),
+        this.BITbr.bind(this, 3, "l"),
+        this.BITb_HL.bind(this, 3),
+        this.BITbr.bind(this, 3, "a"),
+      ],
+      6: [
+        this.BITbr.bind(this, 4, "b"),
+        this.BITbr.bind(this, 4, "c"),
+        this.BITbr.bind(this, 4, "d"),
+        this.BITbr.bind(this, 4, "e"),
+        this.BITbr.bind(this, 4, "h"),
+        this.BITbr.bind(this, 4, "l"),
+        this.BITb_HL.bind(this, 4),
+        this.BITbr.bind(this, 4, "a"),
+        this.BITbr.bind(this, 5, "b"),
+        this.BITbr.bind(this, 5, "c"),
+        this.BITbr.bind(this, 5, "d"),
+        this.BITbr.bind(this, 5, "e"),
+        this.BITbr.bind(this, 5, "h"),
+        this.BITbr.bind(this, 5, "l"),
+        this.BITb_HL.bind(this, 5),
+        this.BITbr.bind(this, 5, "a"),
+      ],
+      7: [
+        this.BITbr.bind(this, 6, "b"),
+        this.BITbr.bind(this, 6, "c"),
+        this.BITbr.bind(this, 6, "d"),
+        this.BITbr.bind(this, 6, "e"),
+        this.BITbr.bind(this, 6, "h"),
+        this.BITbr.bind(this, 6, "l"),
+        this.BITb_HL.bind(this, 6),
+        this.BITbr.bind(this, 6, "a"),
+        this.BITbr.bind(this, 7, "b"),
+        this.BITbr.bind(this, 7, "c"),
+        this.BITbr.bind(this, 7, "d"),
+        this.BITbr.bind(this, 7, "e"),
+        this.BITbr.bind(this, 7, "h"),
+        this.BITbr.bind(this, 7, "l"),
+        this.BITb_HL.bind(this, 7),
+        this.BITbr.bind(this, 7, "a"),
+      ],
+      8: [
+        this.RESbr.bind(this, 0, "b"),
+        this.RESbr.bind(this, 0, "c"),
+        this.RESbr.bind(this, 0, "d"),
+        this.RESbr.bind(this, 0, "e"),
+        this.RESbr.bind(this, 0, "h"),
+        this.RESbr.bind(this, 0, "l"),
+        this.RESb_HL.bind(this, 0),
+        this.RESbr.bind(this, 0, "a"),
+        this.RESbr.bind(this, 1, "b"),
+        this.RESbr.bind(this, 1, "c"),
+        this.RESbr.bind(this, 1, "d"),
+        this.RESbr.bind(this, 1, "e"),
+        this.RESbr.bind(this, 1, "h"),
+        this.RESbr.bind(this, 1, "l"),
+        this.RESb_HL.bind(this, 1),
+        this.RESbr.bind(this, 1, "a"),
+      ],
+      9: [
+        this.RESbr.bind(this, 2, "b"),
+        this.RESbr.bind(this, 2, "c"),
+        this.RESbr.bind(this, 2, "d"),
+        this.RESbr.bind(this, 2, "e"),
+        this.RESbr.bind(this, 2, "h"),
+        this.RESbr.bind(this, 2, "l"),
+        this.RESb_HL.bind(this, 2),
+        this.RESbr.bind(this, 2, "a"),
+        this.RESbr.bind(this, 3, "b"),
+        this.RESbr.bind(this, 3, "c"),
+        this.RESbr.bind(this, 3, "d"),
+        this.RESbr.bind(this, 3, "e"),
+        this.RESbr.bind(this, 3, "h"),
+        this.RESbr.bind(this, 3, "l"),
+        this.RESb_HL.bind(this, 3),
+        this.RESbr.bind(this, 3, "a"),
+      ],
+      10: [
+        this.RESbr.bind(this, 4, "b"),
+        this.RESbr.bind(this, 4, "c"),
+        this.RESbr.bind(this, 4, "d"),
+        this.RESbr.bind(this, 4, "e"),
+        this.RESbr.bind(this, 4, "h"),
+        this.RESbr.bind(this, 4, "l"),
+        this.RESb_HL.bind(this, 4),
+        this.RESbr.bind(this, 4, "a"),
+        this.RESbr.bind(this, 5, "b"),
+        this.RESbr.bind(this, 5, "c"),
+        this.RESbr.bind(this, 5, "d"),
+        this.RESbr.bind(this, 5, "e"),
+        this.RESbr.bind(this, 5, "h"),
+        this.RESbr.bind(this, 5, "l"),
+        this.RESb_HL.bind(this, 5),
+        this.RESbr.bind(this, 5, "a"),
+      ],
+      11: [
+        this.RESbr.bind(this, 6, "b"),
+        this.RESbr.bind(this, 6, "c"),
+        this.RESbr.bind(this, 6, "d"),
+        this.RESbr.bind(this, 6, "e"),
+        this.RESbr.bind(this, 6, "h"),
+        this.RESbr.bind(this, 6, "l"),
+        this.RESb_HL.bind(this, 6),
+        this.RESbr.bind(this, 6, "a"),
+        this.RESbr.bind(this, 7, "b"),
+        this.RESbr.bind(this, 7, "c"),
+        this.RESbr.bind(this, 7, "d"),
+        this.RESbr.bind(this, 7, "e"),
+        this.RESbr.bind(this, 7, "h"),
+        this.RESbr.bind(this, 7, "l"),
+        this.RESb_HL.bind(this, 7),
+        this.RESbr.bind(this, 7, "a"),
+      ],
+      12: [
+        this.SETbr.bind(this, 0, "b"),
+        this.SETbr.bind(this, 0, "c"),
+        this.SETbr.bind(this, 0, "d"),
+        this.SETbr.bind(this, 0, "e"),
+        this.SETbr.bind(this, 0, "h"),
+        this.SETbr.bind(this, 0, "l"),
+        this.SETb_HL.bind(this, 0),
+        this.SETbr.bind(this, 0, "a"),
+        this.SETbr.bind(this, 1, "b"),
+        this.SETbr.bind(this, 1, "c"),
+        this.SETbr.bind(this, 1, "d"),
+        this.SETbr.bind(this, 1, "e"),
+        this.SETbr.bind(this, 1, "h"),
+        this.SETbr.bind(this, 1, "l"),
+        this.SETb_HL.bind(this, 1),
+        this.SETbr.bind(this, 1, "a"),
+      ],
+      13: [
+        this.SETbr.bind(this, 2, "b"),
+        this.SETbr.bind(this, 2, "c"),
+        this.SETbr.bind(this, 2, "d"),
+        this.SETbr.bind(this, 2, "e"),
+        this.SETbr.bind(this, 2, "h"),
+        this.SETbr.bind(this, 2, "l"),
+        this.SETb_HL.bind(this, 2),
+        this.SETbr.bind(this, 2, "a"),
+        this.SETbr.bind(this, 3, "b"),
+        this.SETbr.bind(this, 3, "c"),
+        this.SETbr.bind(this, 3, "d"),
+        this.SETbr.bind(this, 3, "e"),
+        this.SETbr.bind(this, 3, "h"),
+        this.SETbr.bind(this, 3, "l"),
+        this.SETb_HL.bind(this, 3),
+        this.SETbr.bind(this, 3, "a"),
+      ],
+      14: [
+        this.SETbr.bind(this, 4, "b"),
+        this.SETbr.bind(this, 4, "c"),
+        this.SETbr.bind(this, 4, "d"),
+        this.SETbr.bind(this, 4, "e"),
+        this.SETbr.bind(this, 4, "h"),
+        this.SETbr.bind(this, 4, "l"),
+        this.SETb_HL.bind(this, 4),
+        this.SETbr.bind(this, 4, "a"),
+        this.SETbr.bind(this, 5, "b"),
+        this.SETbr.bind(this, 5, "c"),
+        this.SETbr.bind(this, 5, "d"),
+        this.SETbr.bind(this, 5, "e"),
+        this.SETbr.bind(this, 5, "h"),
+        this.SETbr.bind(this, 5, "l"),
+        this.SETb_HL.bind(this, 5),
+        this.SETbr.bind(this, 5, "a"),
+      ],
+      15: [
+        this.SETbr.bind(this, 6, "b"),
+        this.SETbr.bind(this, 6, "c"),
+        this.SETbr.bind(this, 6, "d"),
+        this.SETbr.bind(this, 6, "e"),
+        this.SETbr.bind(this, 6, "h"),
+        this.SETbr.bind(this, 6, "l"),
+        this.SETb_HL.bind(this, 6),
+        this.SETbr.bind(this, 6, "a"),
+        this.SETbr.bind(this, 7, "b"),
+        this.SETbr.bind(this, 7, "c"),
+        this.SETbr.bind(this, 7, "d"),
+        this.SETbr.bind(this, 7, "e"),
+        this.SETbr.bind(this, 7, "h"),
+        this.SETbr.bind(this, 7, "l"),
+        this.SETb_HL.bind(this, 7),
+        this.SETbr.bind(this, 7, "a"),
+      ],
+    };
     this._MMU = new MMU();
   }
 
@@ -57,6 +635,16 @@ class CPU {
     this._clock.m = 0;
     this._clock.t = 0;
     this._r.ime = 1;
+  }
+
+  exec() {
+    this._r.r = (this._r.r + 1) & 127;
+    let op = this.getOp(this._MMU.rb(this._r.pc++));
+    op();
+    this._r.pc &= 65535;
+    this._clock.m += this._r.m;
+    this._clock.t += this._r.t;
+    if (this._MMU._inbios && this._r.pc == 0x0100) this._MMU._inbios = 0;
   }
 
   //Helper Functions
@@ -100,15 +688,28 @@ class CPU {
     this._r.f = (this._r.f & ~BitIndexToHex[4]) + co;
   }
 
-  MAPcb() {
-    var i = this._MMU.rb(this._r.pc);
+  getOp(i: number) {
+    let key = Math.floor(i / 16);
+    let index = i % 16;
+    return this._map[key][index];
+  }
+
+  getCbOp(i: number) {
+    let key = Math.floor(i / 16);
+    let index = i % 16;
+    return this._cbmap[key][index];
+  }
+
+  mapCb() {
+    let i = this._MMU.rb(this._r.pc);
     this._r.pc++;
     this._r.pc &= 65535;
-    if (this._cbmap[i]) this._cbmap[i]();
+    let op = this.getCbOp(i);
+    if (!!op) op();
     else alert(i);
   }
 
-  XX() {
+  xx() {
     /*Undefined map entry*/
     let opc = this._r.pc - 1;
     alert("No instruction found for $" + opc.toString(16) + ", stopping.");
@@ -269,6 +870,13 @@ class CPU {
     this._r.pc += 2;
     this._r.m = 3;
     this._r.t = 12;
+  }
+
+  LDnn_SP() {
+    this._MMU.ww((this._r.pc << 8) + this._r.pc + 1, this._r.sp);
+    this._r.pc += 2;
+    this._r.m = 5;
+    this._r.t = 20;
   }
 
   LDSP_HL() {
@@ -865,15 +1473,6 @@ class CPU {
   }
 
   //Control Ops
-  // NEG() {
-  //   this._r.a = 0 - this._r.a;
-  //   this.zeroOpF(this._r.a, true);
-  //   if (this._r.a < 0) this._r.f |= BitIndexToHex[4];
-  //   this._r.a &= 255;
-  //   this._r.m = 2;
-  //   this._r.t = 8;
-  // }
-
   CCF() {
     let ci = this._r.f & BitIndexToHex[4] ? 0 : BitIndexToHex[4];
     this._r.f = (this._r.f & ~BitIndexToHex[4]) + ci;
@@ -1041,20 +1640,6 @@ class CPU {
       this._r.t += 4;
     }
   }
-
-  // DJNZe() {
-  //   let i = this._MMU.rb(this._r.pc);
-  //   if (i > 127) i = -((~i + 1) & 255);
-  //   this._r.pc += 1;
-  //   this._r.m = 2;
-  //   this._r.t = 8;
-  //   this._r.b -= 1;
-  //   if (this._r.b) {
-  //     this._r.pc += i;
-  //     this._r.m += 1;
-  //     this._r.t += 4;
-  //   }
-  // }
 
   CALLnn() {
     this._r.sp -= 2;
