@@ -1,24 +1,35 @@
-import './style.css'
-import typescriptLogo from './typescript.svg'
-import viteLogo from '/vite.svg'
-import { setupCounter } from './counter.ts'
+function main() {
+  const input = document.querySelector(".rom-input") as HTMLInputElement;
+  const startStop = document.querySelector(".emu-start-stop") as HTMLButtonElement;
 
-document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
-  <div>
-    <a href="https://vitejs.dev" target="_blank">
-      <img src="${viteLogo}" class="logo" alt="Vite logo" />
-    </a>
-    <a href="https://www.typescriptlang.org/" target="_blank">
-      <img src="${typescriptLogo}" class="logo vanilla" alt="TypeScript logo" />
-    </a>
-    <h1>Vite + TypeScript</h1>
-    <div class="card">
-      <button id="counter" type="button"></button>
-    </div>
-    <p class="read-the-docs">
-      Click on the Vite and TypeScript logos to learn more
-    </p>
-  </div>
-`
+  const emulator = new Worker(new URL("./emulator/index.ts", import.meta.url), {
+    name: "emulator",
+    type: "module",
+  });
 
-setupCounter(document.querySelector<HTMLButtonElement>('#counter')!)
+  input.addEventListener("change", (event) => {
+    const files = (event.target as HTMLInputElement).files;
+
+    if (files && files.length > 0) {
+      const rom = files[0];
+      emulator.postMessage({ action: "load", rom });
+    }
+  });
+
+  startStop.addEventListener("click", (event) => {
+    event.preventDefault();
+    emulator.postMessage({ action: "toggleStartStop" });
+    switch (startStop.innerText) {
+      case "start":
+        startStop.innerText = "stop";
+        break;
+      case "stop":
+        startStop.innerText = "start";
+        break;
+    }
+  });
+}
+
+document.addEventListener("DOMContentLoaded", function () {
+  main();
+});

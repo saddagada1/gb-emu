@@ -1,1774 +1,1072 @@
-import { BitIndex, GeneralPurposeRegister, Ops } from "./types";
-import { MMU } from "./MMU";
-import { BitIndexToHex } from "./constants";
+import { InstructionName, Instructions } from "../lib/constants";
+import {
+  ADDRESSING_MODE,
+  Bit,
+  CONDITION_TYPE,
+  Instruction,
+  INSTRUCTION_TYPE,
+  INTERRUPT_TYPE,
+  REGISTER,
+} from "../lib/types";
+import { getBit, setBit } from "../lib/utils";
+import { MMU } from "./mmu";
 
 export class CPU {
-  _clock;
   _r;
-  _halt;
-  _stop;
-  _map: Ops;
-  _cbmap: Ops;
-  _MMU;
+  _m;
 
-  constructor() {
-    this._clock = { m: 0, t: 0 };
+  _fetched_data;
+  _is_memory_destination;
+  _memory_destination;
+  _current_opcode;
+  _current_instruction;
+  _interrupt_me;
+  _enabling_interrupt_me;
+  _halted;
+  _stepping;
+
+  _mmu;
+
+  constructor(mmu: MMU) {
     this._r = {
       a: 0,
+      f: 0,
       b: 0,
       c: 0,
       d: 0,
       e: 0,
       h: 0,
       l: 0,
-      f: 0,
-      i: 0,
-      r: 0,
-      pc: 0,
       sp: 0,
-      ime: 0,
-      m: 0,
-      t: 0,
+      pc: 0,
+      ie: 0,
+      i: 0,
     };
-    this._halt = 0;
-    this._stop = 0;
-    this._map = {
-      0: [
-        this.NOP,
-        this.LDrr_nn.bind(this, "b", "c"),
-        this.LDBC_A,
-        this.INCrr.bind(this, "b", "c"),
-        this.INCr.bind(this, "b"),
-        this.DECr.bind(this, "b"),
-        this.LDrn.bind(this, "b"),
-        this.RLCA,
-        this.LDnn_SP,
-        this.ADD_HLrr.bind(this, "b", "c"),
-        this.LDA_BC,
-        this.DECrr.bind(this, "b", "c"),
-        this.INCr.bind(this, "c"),
-        this.DECr.bind(this, "c"),
-        this.LDrn.bind(this, "c"),
-        this.RRCA,
-      ],
-      1: [
-        this.STOP,
-        this.LDrr_nn.bind(this, "d", "e"),
-        this.LDDE_A,
-        this.INCrr.bind(this, "d", "e"),
-        this.INCr.bind(this, "d"),
-        this.DECr.bind(this, "d"),
-        this.LDrn.bind(this, "d"),
-        this.RLA,
-        this.JRe,
-        this.ADD_HLrr.bind(this, "d", "e"),
-        this.LDA_DE,
-        this.DECrr.bind(this, "d", "e"),
-        this.INCr.bind(this, "e"),
-        this.DECr.bind(this, "e"),
-        this.LDrn.bind(this, "e"),
-        this.RRA,
-      ],
-      2: [
-        this.JRNZ_e,
-        this.LDrr_nn.bind(this, "h", "l"),
-        this.LDHLI_A,
-        this.INCrr.bind(this, "h", "l"),
-        this.INCr.bind(this, "h"),
-        this.DECr.bind(this, "h"),
-        this.LDrn.bind(this, "h"),
-        this.DAA,
-        this.JRZ_e,
-        this.ADD_HLrr.bind(this, "h", "l"),
-        this.LDA_HLI,
-        this.DECrr.bind(this, "h", "l"),
-        this.INCr.bind(this, "l"),
-        this.DECr.bind(this, "l"),
-        this.LDrn.bind(this, "l"),
-        this.CPL,
-      ],
-      3: [
-        this.JRNC_e,
-        this.LDSP_nn,
-        this.LDHLD_A,
-        this.INC_SP,
-        this.INC_HL,
-        this.DEC_HL,
-        this.LDHLn,
-        this.SCF,
-        this.JRC_e,
-        this.ADDHL_SP,
-        this.LDA_HLD,
-        this.DEC_SP,
-        this.INCr.bind(this, "a"),
-        this.DECr.bind(this, "a"),
-        this.LDrn.bind(this, "a"),
-        this.CCF,
-      ],
-      4: [
-        this.LDrr.bind(this, "b", "b"),
-        this.LDrr.bind(this, "b", "c"),
-        this.LDrr.bind(this, "b", "d"),
-        this.LDrr.bind(this, "b", "e"),
-        this.LDrr.bind(this, "b", "h"),
-        this.LDrr.bind(this, "b", "l"),
-        this.LDrHL.bind(this, "b"),
-        this.LDrr.bind(this, "b", "a"),
-        this.LDrr.bind(this, "c", "b"),
-        this.LDrr.bind(this, "c", "c"),
-        this.LDrr.bind(this, "c", "d"),
-        this.LDrr.bind(this, "c", "e"),
-        this.LDrr.bind(this, "c", "h"),
-        this.LDrr.bind(this, "c", "l"),
-        this.LDrHL.bind(this, "c"),
-        this.LDrr.bind(this, "c", "a"),
-      ],
-      5: [
-        this.LDrr.bind(this, "d", "b"),
-        this.LDrr.bind(this, "d", "c"),
-        this.LDrr.bind(this, "d", "d"),
-        this.LDrr.bind(this, "d", "e"),
-        this.LDrr.bind(this, "d", "h"),
-        this.LDrr.bind(this, "d", "l"),
-        this.LDrHL.bind(this, "d"),
-        this.LDrr.bind(this, "d", "a"),
-        this.LDrr.bind(this, "e", "b"),
-        this.LDrr.bind(this, "e", "c"),
-        this.LDrr.bind(this, "e", "d"),
-        this.LDrr.bind(this, "e", "e"),
-        this.LDrr.bind(this, "e", "h"),
-        this.LDrr.bind(this, "e", "l"),
-        this.LDrHL.bind(this, "e"),
-        this.LDrr.bind(this, "e", "a"),
-      ],
-      6: [
-        this.LDrr.bind(this, "h", "b"),
-        this.LDrr.bind(this, "h", "c"),
-        this.LDrr.bind(this, "h", "d"),
-        this.LDrr.bind(this, "h", "e"),
-        this.LDrr.bind(this, "h", "h"),
-        this.LDrr.bind(this, "h", "l"),
-        this.LDrHL.bind(this, "h"),
-        this.LDrr.bind(this, "h", "a"),
-        this.LDrr.bind(this, "l", "b"),
-        this.LDrr.bind(this, "l", "c"),
-        this.LDrr.bind(this, "l", "d"),
-        this.LDrr.bind(this, "l", "e"),
-        this.LDrr.bind(this, "l", "h"),
-        this.LDrr.bind(this, "l", "l"),
-        this.LDrHL.bind(this, "l"),
-        this.LDrr.bind(this, "l", "a"),
-      ],
-      7: [
-        this.LDHLr.bind(this, "b"),
-        this.LDHLr.bind(this, "c"),
-        this.LDHLr.bind(this, "d"),
-        this.LDHLr.bind(this, "e"),
-        this.LDHLr.bind(this, "h"),
-        this.LDHLr.bind(this, "l"),
-        this.HALT,
-        this.LDHLr.bind(this, "a"),
-        this.LDrr.bind(this, "a", "b"),
-        this.LDrr.bind(this, "a", "c"),
-        this.LDrr.bind(this, "a", "d"),
-        this.LDrr.bind(this, "a", "e"),
-        this.LDrr.bind(this, "a", "h"),
-        this.LDrr.bind(this, "a", "l"),
-        this.LDrHL.bind(this, "a"),
-        this.LDrr.bind(this, "a", "a"),
-      ],
-      8: [
-        this.ADDr.bind(this, "b"),
-        this.ADDr.bind(this, "c"),
-        this.ADDr.bind(this, "d"),
-        this.ADDr.bind(this, "e"),
-        this.ADDr.bind(this, "h"),
-        this.ADDr.bind(this, "l"),
-        this.ADD_HL,
-        this.ADDr.bind(this, "a"),
-        this.ADCr.bind(this, "b"),
-        this.ADCr.bind(this, "c"),
-        this.ADCr.bind(this, "d"),
-        this.ADCr.bind(this, "e"),
-        this.ADCr.bind(this, "h"),
-        this.ADCr.bind(this, "l"),
-        this.ADC_HL,
-        this.ADCr.bind(this, "a"),
-      ],
-      9: [
-        this.SUBr.bind(this, "b"),
-        this.SUBr.bind(this, "c"),
-        this.SUBr.bind(this, "d"),
-        this.SUBr.bind(this, "e"),
-        this.SUBr.bind(this, "h"),
-        this.SUBr.bind(this, "l"),
-        this.SUB_HL,
-        this.SUBr.bind(this, "a"),
-        this.SBCr.bind(this, "b"),
-        this.SBCr.bind(this, "c"),
-        this.SBCr.bind(this, "d"),
-        this.SBCr.bind(this, "e"),
-        this.SBCr.bind(this, "h"),
-        this.SBCr.bind(this, "l"),
-        this.SBC_HL,
-        this.SBCr.bind(this, "a"),
-      ],
-      10: [
-        this.ANDr.bind(this, "b"),
-        this.ANDr.bind(this, "c"),
-        this.ANDr.bind(this, "d"),
-        this.ANDr.bind(this, "e"),
-        this.ANDr.bind(this, "h"),
-        this.ANDr.bind(this, "l"),
-        this.AND_HL,
-        this.ANDr.bind(this, "a"),
-        this.XORr.bind(this, "b"),
-        this.XORr.bind(this, "c"),
-        this.XORr.bind(this, "d"),
-        this.XORr.bind(this, "e"),
-        this.XORr.bind(this, "h"),
-        this.XORr.bind(this, "l"),
-        this.XOR_HL,
-        this.XORr.bind(this, "a"),
-      ],
-      11: [
-        this.ORr.bind(this, "b"),
-        this.ORr.bind(this, "c"),
-        this.ORr.bind(this, "d"),
-        this.ORr.bind(this, "e"),
-        this.ORr.bind(this, "h"),
-        this.ORr.bind(this, "l"),
-        this.OR_HL,
-        this.ORr.bind(this, "a"),
-        this.CPr.bind(this, "b"),
-        this.CPr.bind(this, "c"),
-        this.CPr.bind(this, "d"),
-        this.CPr.bind(this, "e"),
-        this.CPr.bind(this, "h"),
-        this.CPr.bind(this, "l"),
-        this.CP_HL,
-        this.CPr.bind(this, "a"),
-      ],
-      12: [
-        this.RETNZ,
-        this.POPrr.bind(this, "b", "c"),
-        this.JPNZ_nn,
-        this.JPnn,
-        this.CALLNZ_nn,
-        this.PUSHrr.bind(this, "b", "c"),
-        this.ADDn,
-        this.RST_N.bind(this, 0x00),
-        this.RETZ,
-        this.RET,
-        this.JPZ_nn,
-        this.mapCb,
-        this.CALLZ_nn,
-        this.CALLnn,
-        this.ADCn,
-        this.RST_N.bind(this, 0x08),
-      ],
-      13: [
-        this.RETNC,
-        this.POPrr.bind(this, "d", "e"),
-        this.JPNC_nn,
-        this.xx,
-        this.CALLNC_nn,
-        this.PUSHrr.bind(this, "d", "e"),
-        this.SUBn,
-        this.RST_N.bind(this, 0x10),
-        this.RETC,
-        this.RETI,
-        this.JPC_nn,
-        this.xx,
-        this.CALLC_nn,
-        this.xx,
-        this.SBCn,
-        this.RST_N.bind(this, 0x18),
-      ],
-      14: [
-        this.LDFFn_A,
-        this.POPrr.bind(this, "h", "l"),
-        this.LDFFC_A,
-        this.xx,
-        this.xx,
-        this.PUSHrr.bind(this, "h", "l"),
-        this.ANDn,
-        this.RST_N.bind(this, 0x20),
-        this.ADDSP_e,
-        this.JP_HL,
-        this.LDnnA,
-        this.xx,
-        this.xx,
-        this.xx,
-        this.XORn,
-        this.RST_N.bind(this, 0x28),
-      ],
-      15: [
-        this.LDA_FFn,
-        this.POPrr.bind(this, "a", "f"),
-        this.LDA_FFC,
-        this.DI,
-        this.xx,
-        this.PUSHrr.bind(this, "a", "f"),
-        this.ORn,
-        this.RST_N.bind(this, 0x30),
-        this.LDHL_SPe,
-        this.LDSP_HL,
-        this.LDAnn,
-        this.EI,
-        this.xx,
-        this.xx,
-        this.CPn,
-        this.RST_N.bind(this, 0x38),
-      ],
-    };
-    this._cbmap = {
-      0: [
-        this.RLCr.bind(this, "b"),
-        this.RLCr.bind(this, "c"),
-        this.RLCr.bind(this, "d"),
-        this.RLCr.bind(this, "e"),
-        this.RLCr.bind(this, "h"),
-        this.RLCr.bind(this, "l"),
-        this.RLC_HL,
-        this.RLCr.bind(this, "a"),
-        this.RRCr.bind(this, "b"),
-        this.RRCr.bind(this, "c"),
-        this.RRCr.bind(this, "d"),
-        this.RRCr.bind(this, "e"),
-        this.RRCr.bind(this, "h"),
-        this.RRCr.bind(this, "l"),
-        this.RRC_HL,
-        this.RRCr.bind(this, "a"),
-      ],
-      1: [
-        this.RLr.bind(this, "b"),
-        this.RLr.bind(this, "c"),
-        this.RLr.bind(this, "d"),
-        this.RLr.bind(this, "e"),
-        this.RLr.bind(this, "h"),
-        this.RLr.bind(this, "l"),
-        this.RL_HL,
-        this.RLr.bind(this, "a"),
-        this.RRr.bind(this, "b"),
-        this.RRr.bind(this, "c"),
-        this.RRr.bind(this, "d"),
-        this.RRr.bind(this, "e"),
-        this.RRr.bind(this, "h"),
-        this.RRr.bind(this, "l"),
-        this.RR_HL,
-        this.RRr.bind(this, "a"),
-      ],
-      2: [
-        this.SLAr.bind(this, "b"),
-        this.SLAr.bind(this, "c"),
-        this.SLAr.bind(this, "d"),
-        this.SLAr.bind(this, "e"),
-        this.SLAr.bind(this, "h"),
-        this.SLAr.bind(this, "l"),
-        this.SLA_HL,
-        this.SLAr.bind(this, "a"),
-        this.SRAr.bind(this, "b"),
-        this.SRAr.bind(this, "c"),
-        this.SRAr.bind(this, "d"),
-        this.SRAr.bind(this, "e"),
-        this.SRAr.bind(this, "h"),
-        this.SRAr.bind(this, "l"),
-        this.SRA_HL,
-        this.SRAr.bind(this, "a"),
-      ],
-      3: [
-        this.SWAPr.bind(this, "b"),
-        this.SWAPr.bind(this, "c"),
-        this.SWAPr.bind(this, "d"),
-        this.SWAPr.bind(this, "e"),
-        this.SWAPr.bind(this, "h"),
-        this.SWAPr.bind(this, "l"),
-        this.SWAP_HL,
-        this.SWAPr.bind(this, "a"),
-        this.SRLr.bind(this, "b"),
-        this.SRLr.bind(this, "c"),
-        this.SRLr.bind(this, "d"),
-        this.SRLr.bind(this, "e"),
-        this.SRLr.bind(this, "h"),
-        this.SRLr.bind(this, "l"),
-        this.SRL_HL,
-        this.SRLr.bind(this, "a"),
-      ],
-      4: [
-        this.BITbr.bind(this, 0, "b"),
-        this.BITbr.bind(this, 0, "c"),
-        this.BITbr.bind(this, 0, "d"),
-        this.BITbr.bind(this, 0, "e"),
-        this.BITbr.bind(this, 0, "h"),
-        this.BITbr.bind(this, 0, "l"),
-        this.BITb_HL.bind(this, 0),
-        this.BITbr.bind(this, 0, "a"),
-        this.BITbr.bind(this, 1, "b"),
-        this.BITbr.bind(this, 1, "c"),
-        this.BITbr.bind(this, 1, "d"),
-        this.BITbr.bind(this, 1, "e"),
-        this.BITbr.bind(this, 1, "h"),
-        this.BITbr.bind(this, 1, "l"),
-        this.BITb_HL.bind(this, 1),
-        this.BITbr.bind(this, 1, "a"),
-      ],
-      5: [
-        this.BITbr.bind(this, 2, "b"),
-        this.BITbr.bind(this, 2, "c"),
-        this.BITbr.bind(this, 2, "d"),
-        this.BITbr.bind(this, 2, "e"),
-        this.BITbr.bind(this, 2, "h"),
-        this.BITbr.bind(this, 2, "l"),
-        this.BITb_HL.bind(this, 2),
-        this.BITbr.bind(this, 2, "a"),
-        this.BITbr.bind(this, 3, "b"),
-        this.BITbr.bind(this, 3, "c"),
-        this.BITbr.bind(this, 3, "d"),
-        this.BITbr.bind(this, 3, "e"),
-        this.BITbr.bind(this, 3, "h"),
-        this.BITbr.bind(this, 3, "l"),
-        this.BITb_HL.bind(this, 3),
-        this.BITbr.bind(this, 3, "a"),
-      ],
-      6: [
-        this.BITbr.bind(this, 4, "b"),
-        this.BITbr.bind(this, 4, "c"),
-        this.BITbr.bind(this, 4, "d"),
-        this.BITbr.bind(this, 4, "e"),
-        this.BITbr.bind(this, 4, "h"),
-        this.BITbr.bind(this, 4, "l"),
-        this.BITb_HL.bind(this, 4),
-        this.BITbr.bind(this, 4, "a"),
-        this.BITbr.bind(this, 5, "b"),
-        this.BITbr.bind(this, 5, "c"),
-        this.BITbr.bind(this, 5, "d"),
-        this.BITbr.bind(this, 5, "e"),
-        this.BITbr.bind(this, 5, "h"),
-        this.BITbr.bind(this, 5, "l"),
-        this.BITb_HL.bind(this, 5),
-        this.BITbr.bind(this, 5, "a"),
-      ],
-      7: [
-        this.BITbr.bind(this, 6, "b"),
-        this.BITbr.bind(this, 6, "c"),
-        this.BITbr.bind(this, 6, "d"),
-        this.BITbr.bind(this, 6, "e"),
-        this.BITbr.bind(this, 6, "h"),
-        this.BITbr.bind(this, 6, "l"),
-        this.BITb_HL.bind(this, 6),
-        this.BITbr.bind(this, 6, "a"),
-        this.BITbr.bind(this, 7, "b"),
-        this.BITbr.bind(this, 7, "c"),
-        this.BITbr.bind(this, 7, "d"),
-        this.BITbr.bind(this, 7, "e"),
-        this.BITbr.bind(this, 7, "h"),
-        this.BITbr.bind(this, 7, "l"),
-        this.BITb_HL.bind(this, 7),
-        this.BITbr.bind(this, 7, "a"),
-      ],
-      8: [
-        this.RESbr.bind(this, 0, "b"),
-        this.RESbr.bind(this, 0, "c"),
-        this.RESbr.bind(this, 0, "d"),
-        this.RESbr.bind(this, 0, "e"),
-        this.RESbr.bind(this, 0, "h"),
-        this.RESbr.bind(this, 0, "l"),
-        this.RESb_HL.bind(this, 0),
-        this.RESbr.bind(this, 0, "a"),
-        this.RESbr.bind(this, 1, "b"),
-        this.RESbr.bind(this, 1, "c"),
-        this.RESbr.bind(this, 1, "d"),
-        this.RESbr.bind(this, 1, "e"),
-        this.RESbr.bind(this, 1, "h"),
-        this.RESbr.bind(this, 1, "l"),
-        this.RESb_HL.bind(this, 1),
-        this.RESbr.bind(this, 1, "a"),
-      ],
-      9: [
-        this.RESbr.bind(this, 2, "b"),
-        this.RESbr.bind(this, 2, "c"),
-        this.RESbr.bind(this, 2, "d"),
-        this.RESbr.bind(this, 2, "e"),
-        this.RESbr.bind(this, 2, "h"),
-        this.RESbr.bind(this, 2, "l"),
-        this.RESb_HL.bind(this, 2),
-        this.RESbr.bind(this, 2, "a"),
-        this.RESbr.bind(this, 3, "b"),
-        this.RESbr.bind(this, 3, "c"),
-        this.RESbr.bind(this, 3, "d"),
-        this.RESbr.bind(this, 3, "e"),
-        this.RESbr.bind(this, 3, "h"),
-        this.RESbr.bind(this, 3, "l"),
-        this.RESb_HL.bind(this, 3),
-        this.RESbr.bind(this, 3, "a"),
-      ],
-      10: [
-        this.RESbr.bind(this, 4, "b"),
-        this.RESbr.bind(this, 4, "c"),
-        this.RESbr.bind(this, 4, "d"),
-        this.RESbr.bind(this, 4, "e"),
-        this.RESbr.bind(this, 4, "h"),
-        this.RESbr.bind(this, 4, "l"),
-        this.RESb_HL.bind(this, 4),
-        this.RESbr.bind(this, 4, "a"),
-        this.RESbr.bind(this, 5, "b"),
-        this.RESbr.bind(this, 5, "c"),
-        this.RESbr.bind(this, 5, "d"),
-        this.RESbr.bind(this, 5, "e"),
-        this.RESbr.bind(this, 5, "h"),
-        this.RESbr.bind(this, 5, "l"),
-        this.RESb_HL.bind(this, 5),
-        this.RESbr.bind(this, 5, "a"),
-      ],
-      11: [
-        this.RESbr.bind(this, 6, "b"),
-        this.RESbr.bind(this, 6, "c"),
-        this.RESbr.bind(this, 6, "d"),
-        this.RESbr.bind(this, 6, "e"),
-        this.RESbr.bind(this, 6, "h"),
-        this.RESbr.bind(this, 6, "l"),
-        this.RESb_HL.bind(this, 6),
-        this.RESbr.bind(this, 6, "a"),
-        this.RESbr.bind(this, 7, "b"),
-        this.RESbr.bind(this, 7, "c"),
-        this.RESbr.bind(this, 7, "d"),
-        this.RESbr.bind(this, 7, "e"),
-        this.RESbr.bind(this, 7, "h"),
-        this.RESbr.bind(this, 7, "l"),
-        this.RESb_HL.bind(this, 7),
-        this.RESbr.bind(this, 7, "a"),
-      ],
-      12: [
-        this.SETbr.bind(this, 0, "b"),
-        this.SETbr.bind(this, 0, "c"),
-        this.SETbr.bind(this, 0, "d"),
-        this.SETbr.bind(this, 0, "e"),
-        this.SETbr.bind(this, 0, "h"),
-        this.SETbr.bind(this, 0, "l"),
-        this.SETb_HL.bind(this, 0),
-        this.SETbr.bind(this, 0, "a"),
-        this.SETbr.bind(this, 1, "b"),
-        this.SETbr.bind(this, 1, "c"),
-        this.SETbr.bind(this, 1, "d"),
-        this.SETbr.bind(this, 1, "e"),
-        this.SETbr.bind(this, 1, "h"),
-        this.SETbr.bind(this, 1, "l"),
-        this.SETb_HL.bind(this, 1),
-        this.SETbr.bind(this, 1, "a"),
-      ],
-      13: [
-        this.SETbr.bind(this, 2, "b"),
-        this.SETbr.bind(this, 2, "c"),
-        this.SETbr.bind(this, 2, "d"),
-        this.SETbr.bind(this, 2, "e"),
-        this.SETbr.bind(this, 2, "h"),
-        this.SETbr.bind(this, 2, "l"),
-        this.SETb_HL.bind(this, 2),
-        this.SETbr.bind(this, 2, "a"),
-        this.SETbr.bind(this, 3, "b"),
-        this.SETbr.bind(this, 3, "c"),
-        this.SETbr.bind(this, 3, "d"),
-        this.SETbr.bind(this, 3, "e"),
-        this.SETbr.bind(this, 3, "h"),
-        this.SETbr.bind(this, 3, "l"),
-        this.SETb_HL.bind(this, 3),
-        this.SETbr.bind(this, 3, "a"),
-      ],
-      14: [
-        this.SETbr.bind(this, 4, "b"),
-        this.SETbr.bind(this, 4, "c"),
-        this.SETbr.bind(this, 4, "d"),
-        this.SETbr.bind(this, 4, "e"),
-        this.SETbr.bind(this, 4, "h"),
-        this.SETbr.bind(this, 4, "l"),
-        this.SETb_HL.bind(this, 4),
-        this.SETbr.bind(this, 4, "a"),
-        this.SETbr.bind(this, 5, "b"),
-        this.SETbr.bind(this, 5, "c"),
-        this.SETbr.bind(this, 5, "d"),
-        this.SETbr.bind(this, 5, "e"),
-        this.SETbr.bind(this, 5, "h"),
-        this.SETbr.bind(this, 5, "l"),
-        this.SETb_HL.bind(this, 5),
-        this.SETbr.bind(this, 5, "a"),
-      ],
-      15: [
-        this.SETbr.bind(this, 6, "b"),
-        this.SETbr.bind(this, 6, "c"),
-        this.SETbr.bind(this, 6, "d"),
-        this.SETbr.bind(this, 6, "e"),
-        this.SETbr.bind(this, 6, "h"),
-        this.SETbr.bind(this, 6, "l"),
-        this.SETb_HL.bind(this, 6),
-        this.SETbr.bind(this, 6, "a"),
-        this.SETbr.bind(this, 7, "b"),
-        this.SETbr.bind(this, 7, "c"),
-        this.SETbr.bind(this, 7, "d"),
-        this.SETbr.bind(this, 7, "e"),
-        this.SETbr.bind(this, 7, "h"),
-        this.SETbr.bind(this, 7, "l"),
-        this.SETb_HL.bind(this, 7),
-        this.SETbr.bind(this, 7, "a"),
-      ],
-    };
-    this._MMU = new MMU();
+    this._m = 0;
+    this._fetched_data = 0;
+    this._is_memory_destination = false;
+    this._memory_destination = 0;
+    this._current_opcode = 0;
+    this._current_instruction = {} as Instruction;
+    this._interrupt_me = false;
+    this._enabling_interrupt_me = false;
+    this._halted = false;
+    this._stepping = false;
+    this._mmu = mmu;
   }
 
-  reset() {
-    this._r.b = 0;
-    this._r.a = 0;
-    this._r.c = 0;
-    this._r.d = 0;
-    this._r.e = 0;
-    this._r.h = 0;
-    this._r.l = 0;
-    this._r.f = 0;
-    this._r.sp = 0;
-    this._r.pc = 0;
-    this._r.i = 0;
-    this._r.r = 0;
-    this._r.m = 0;
-    this._r.t = 0;
-    this._halt = 0;
-    this._stop = 0;
-    this._clock.m = 0;
-    this._clock.t = 0;
-    this._r.ime = 1;
+  cycleCPU(val: number) {
+    this._m += val;
   }
 
-  exec() {
-    this._r.r = (this._r.r + 1) & 127;
-    let op = this.getOp(this._MMU.rb(this._r.pc++));
+  stackPush(val: number) {
+    this._r.sp -= 1;
+    this._mmu.write(this._r.sp, val);
+  }
+
+  stackPush16(val: number) {
+    this.stackPush((val >> 8) & 0xff);
+    this.stackPush(val & 0xff);
+  }
+
+  stackPop() {
+    this._r.sp += 1;
+    return this._mmu.read(this._r.sp);
+  }
+
+  stackPop16() {
+    const low = this.stackPop();
+    const high = this.stackPop();
+    return (high << 8) | low;
+  }
+
+  readRegister(r: REGISTER) {
+    switch (r) {
+      case REGISTER.A:
+        return this._r.a;
+      case REGISTER.F:
+        return this._r.f;
+      case REGISTER.B:
+        return this._r.b;
+      case REGISTER.C:
+        return this._r.c;
+      case REGISTER.D:
+        return this._r.d;
+      case REGISTER.E:
+        return this._r.e;
+      case REGISTER.H:
+        return this._r.h;
+      case REGISTER.L:
+        return this._r.l;
+
+      case REGISTER.AF:
+        return (this._r.a << 8) | this._r.f;
+      case REGISTER.BC:
+        return (this._r.b << 8) | this._r.c;
+      case REGISTER.DE:
+        return (this._r.d << 8) | this._r.e;
+      case REGISTER.HL:
+        return (this._r.h << 8) | this._r.l;
+
+      case REGISTER.SP:
+        return this._r.sp;
+      case REGISTER.PC:
+        return this._r.pc;
+      case REGISTER.IE:
+        return this._r.ie;
+      case REGISTER.I:
+        return this._r.i;
+
+      default:
+        return 0;
+    }
+  }
+
+  writeRegister(r: REGISTER, value: number) {
+    switch (r) {
+      case REGISTER.A:
+        this._r.a = value & 0xff;
+        return;
+      case REGISTER.F:
+        this._r.f = value & 0xff;
+        return;
+      case REGISTER.B:
+        this._r.b = value & 0xff;
+        return;
+      case REGISTER.C:
+        this._r.c = value & 0xff;
+        return;
+      case REGISTER.D:
+        this._r.d = value & 0xff;
+        return;
+      case REGISTER.E:
+        this._r.e = value & 0xff;
+        return;
+      case REGISTER.H:
+        this._r.h = value & 0xff;
+        return;
+      case REGISTER.L:
+        this._r.l = value & 0xff;
+        return;
+
+      case REGISTER.AF:
+        this._r.a = (value >> 8) & 0xff;
+        this._r.f = value & 0xff;
+        return;
+      case REGISTER.BC:
+        this._r.b = (value >> 8) & 0xff;
+        this._r.c = value & 0xff;
+        return;
+      case REGISTER.DE:
+        this._r.d = (value >> 8) & 0xff;
+        this._r.e = value & 0xff;
+        return;
+      case REGISTER.HL:
+        this._r.h = (value >> 8) & 0xff;
+        this._r.l = value & 0xff;
+        return;
+
+      case REGISTER.SP:
+        this._r.sp = value;
+        return;
+      case REGISTER.PC:
+        this._r.pc = value;
+        return;
+      case REGISTER.IE:
+        this._r.ie = value;
+        return;
+      case REGISTER.I:
+        this._r.i = value;
+        return;
+
+      default:
+        return 0;
+    }
+  }
+
+  readInstruction(i: INSTRUCTION_TYPE) {
+    switch (i) {
+      case INSTRUCTION_TYPE.NOP:
+        return this.NOP.bind(this);
+      case INSTRUCTION_TYPE.LD:
+        return this.LD.bind(this);
+      case INSTRUCTION_TYPE.LDH:
+        return this.LDH.bind(this);
+      case INSTRUCTION_TYPE.PUSH:
+        return this.PUSH.bind(this);
+      case INSTRUCTION_TYPE.POP:
+        return this.POP.bind(this);
+      case INSTRUCTION_TYPE.JP:
+        return this.JP.bind(this);
+      case INSTRUCTION_TYPE.JR:
+        return this.JR.bind(this);
+      case INSTRUCTION_TYPE.CALL:
+        return this.CALL.bind(this);
+      case INSTRUCTION_TYPE.RET:
+        return this.RET.bind(this);
+      case INSTRUCTION_TYPE.RETI:
+        return this.RETI.bind(this);
+      case INSTRUCTION_TYPE.RST:
+        return this.RST.bind(this);
+      case INSTRUCTION_TYPE.INC:
+        return this.INC.bind(this);
+      case INSTRUCTION_TYPE.DEC:
+        return this.DEC.bind(this);
+      case INSTRUCTION_TYPE.ADD:
+        return this.ADD.bind(this);
+      case INSTRUCTION_TYPE.ADC:
+        return this.ADC.bind(this);
+      case INSTRUCTION_TYPE.SUB:
+        return this.SUB.bind(this);
+      case INSTRUCTION_TYPE.SBC:
+        return this.SBC.bind(this);
+      case INSTRUCTION_TYPE.AND:
+        return this.AND.bind(this);
+      case INSTRUCTION_TYPE.OR:
+        return this.OR.bind(this);
+      case INSTRUCTION_TYPE.XOR:
+        return this.XOR.bind(this);
+      case INSTRUCTION_TYPE.CP:
+        return this.CP.bind(this);
+      case INSTRUCTION_TYPE.CB:
+        return this.CB.bind(this);
+      case INSTRUCTION_TYPE.RLCA:
+        return this.RLCA.bind(this);
+      case INSTRUCTION_TYPE.RRCA:
+        return this.RRCA.bind(this);
+      case INSTRUCTION_TYPE.RLA:
+        return this.RLA.bind(this);
+      case INSTRUCTION_TYPE.RRA:
+        return this.RRA.bind(this);
+      case INSTRUCTION_TYPE.DAA:
+        return this.DAA.bind(this);
+      case INSTRUCTION_TYPE.CPL:
+        return this.CPL.bind(this);
+      case INSTRUCTION_TYPE.SCF:
+        return this.SCF.bind(this);
+      case INSTRUCTION_TYPE.CCF:
+        return this.CCF.bind(this);
+      case INSTRUCTION_TYPE.EI:
+        return this.EI.bind(this);
+      case INSTRUCTION_TYPE.DI:
+        return this.DI.bind(this);
+      case INSTRUCTION_TYPE.HALT:
+        return this.HALT.bind(this);
+      case INSTRUCTION_TYPE.STOP:
+        return this.STOP.bind(this);
+      default:
+        return this.NOP.bind(this);
+    }
+  }
+
+  getCFlag() {
+    return getBit({ n: this._r.f, bit: 4 });
+  }
+
+  getHFlag() {
+    return getBit({ n: this._r.f, bit: 5 });
+  }
+
+  getNFlag() {
+    return getBit({ n: this._r.f, bit: 6 });
+  }
+
+  getZFlag() {
+    return getBit({ n: this._r.f, bit: 7 });
+  }
+
+  setFlags({ c, h, n, z }: { c?: Bit; h?: Bit; n?: Bit; z?: Bit }) {
+    if (!!c) setBit({ n: this._r.f, bit: 4, val: c });
+
+    if (!!h) setBit({ n: this._r.f, bit: 5, val: h });
+
+    if (!!n) setBit({ n: this._r.f, bit: 6, val: n });
+
+    if (!!z) setBit({ n: this._r.f, bit: 7, val: z });
+  }
+
+  checkRegister(id: number) {
+    switch (id) {
+      case 1:
+        if (this._current_instruction.r1 === undefined) {
+          throw Error("Fetch Error: Register 1 not supplied.");
+        }
+        return;
+      case 2:
+        if (this._current_instruction.r2 === undefined) {
+          throw Error("Fetch Error: Register 2 not supplied.");
+        }
+        return;
+      case 3:
+        if (
+          this._current_instruction.r1 === undefined ||
+          this._current_instruction.r2 === undefined
+        ) {
+          throw Error("Fetch Error: No registers supplied.");
+        }
+        return;
+      default:
+        return;
+    }
+  }
+
+  checkCondition() {
+    const c = this.getCFlag();
+    const z = this.getZFlag();
+
+    switch (this._current_instruction.condition) {
+      case CONDITION_TYPE.NONE:
+        return true;
+      case CONDITION_TYPE.C:
+        return !!c;
+      case CONDITION_TYPE.Z:
+        return !!z;
+      case CONDITION_TYPE.NC:
+        return !c;
+      case CONDITION_TYPE.NZ:
+        return !z;
+      default:
+        return false;
+    }
+  }
+
+  fetchInstruction() {
+    this._current_opcode = this._mmu.read(this._r.pc);
+    this._current_instruction = Instructions[this._current_opcode];
+    this._r.pc += 1;
+  }
+
+  fetchData() {
+    this._memory_destination = 0;
+    this._is_memory_destination = false;
+
+    switch (this._current_instruction.mode) {
+      case ADDRESSING_MODE.IMP:
+        return;
+
+      case ADDRESSING_MODE.R:
+        this.checkRegister(1);
+        this._fetched_data = this.readRegister(this._current_instruction.r1!);
+        return;
+
+      case ADDRESSING_MODE.HL_SPR:
+      case ADDRESSING_MODE.R_D8:
+      case ADDRESSING_MODE.D8:
+        this._fetched_data = this._mmu.read(this._r.pc);
+        this.cycleCPU(1);
+        this._r.pc += 1;
+        return;
+
+      case ADDRESSING_MODE.R_D16:
+      case ADDRESSING_MODE.D16: {
+        const low = this._mmu.read(this._r.pc);
+        this.cycleCPU(1);
+        const high = this._mmu.read(this._r.pc + 1);
+        this.cycleCPU(1);
+        this._fetched_data = (high << 8) | low;
+        this._r.pc += 2;
+        return;
+      }
+
+      case ADDRESSING_MODE.D16_R: {
+        this.checkRegister(2);
+        this._fetched_data = this.readRegister(this._current_instruction.r2!);
+        const low = this._mmu.read(this._r.pc);
+        this.cycleCPU(1);
+        const high = this._mmu.read(this._r.pc + 1);
+        this.cycleCPU(1);
+        this._memory_destination = (high << 8) | low;
+        this._is_memory_destination = true;
+        this._r.pc += 2;
+        return;
+      }
+
+      case ADDRESSING_MODE.R_HLI:
+        this.checkRegister(2);
+        this._fetched_data = this._mmu.read(this.readRegister(this._current_instruction.r2!));
+        this.cycleCPU(1);
+        this.writeRegister(this._current_instruction.r2!, this._fetched_data + 1);
+        return;
+
+      case ADDRESSING_MODE.R_HLD:
+        this.checkRegister(2);
+        this._fetched_data = this._mmu.read(this.readRegister(this._current_instruction.r2!));
+        this.cycleCPU(1);
+        this.writeRegister(this._current_instruction.r2!, this._fetched_data - 1);
+        return;
+
+      case ADDRESSING_MODE.HLI_R:
+        this.checkRegister(3);
+        this._fetched_data = this.readRegister(this._current_instruction.r2!);
+        this._memory_destination = this._mmu.read(this.readRegister(this._current_instruction.r1!));
+        this._is_memory_destination = true;
+        this.writeRegister(this._current_instruction.r1!, this._fetched_data + 1);
+        return;
+
+      case ADDRESSING_MODE.HLD_R:
+        this.checkRegister(3);
+        this._fetched_data = this.readRegister(this._current_instruction.r2!);
+        this._memory_destination = this._mmu.read(this.readRegister(this._current_instruction.r1!));
+        this._is_memory_destination = true;
+        this.writeRegister(this._current_instruction.r1!, this._fetched_data - 1);
+        return;
+
+      case ADDRESSING_MODE.R_R:
+        this.checkRegister(2);
+        this._fetched_data = this.readRegister(this._current_instruction.r2!);
+        return;
+
+      case ADDRESSING_MODE.R_A8: {
+        const address = this._mmu.read(this._r.pc) & 0xff;
+        this._fetched_data = this._mmu.read(address);
+        this._r.pc += 1;
+        this.cycleCPU(1);
+        return;
+      }
+
+      case ADDRESSING_MODE.R_A16: {
+        const low = this._mmu.read(this._r.pc);
+        this.cycleCPU(1);
+        const high = this._mmu.read(this._r.pc + 1);
+        this.cycleCPU(1);
+        const address = (high << 8) | low;
+        this._fetched_data = this._mmu.read(address);
+        this._r.pc += 2;
+        this.cycleCPU(1);
+        return;
+      }
+
+      case ADDRESSING_MODE.A16_R: {
+        this.checkRegister(2);
+        this._fetched_data = this.readRegister(this._current_instruction.r2!);
+        const low = this._mmu.read(this._r.pc);
+        this.cycleCPU(1);
+        const high = this._mmu.read(this._r.pc + 1);
+        this.cycleCPU(1);
+        const address = (high << 8) | low;
+        this._memory_destination = this._mmu.read(address);
+        this._is_memory_destination = true;
+        this._r.pc += 2;
+        return;
+      }
+
+      case ADDRESSING_MODE.A8_R: {
+        this.checkRegister(2);
+        this._fetched_data = this.readRegister(this._current_instruction.r2!);
+        const address = this._mmu.read(this._r.pc) & 0xff;
+        this._memory_destination = this._mmu.read(address);
+        this._is_memory_destination = true;
+        this._r.pc += 1;
+        this.cycleCPU(1);
+        return;
+      }
+
+      case ADDRESSING_MODE.MR:
+        this.checkRegister(1);
+        this._memory_destination = this.readRegister(this._current_instruction.r1!);
+        this._is_memory_destination = true;
+        this.cycleCPU(1);
+        return;
+
+      case ADDRESSING_MODE.MR_R:
+        this.checkRegister(3);
+        this._fetched_data = this.readRegister(this._current_instruction.r2!);
+        this._memory_destination = this._mmu.read(this.readRegister(this._current_instruction.r1!));
+        if (this._current_instruction.r2 === REGISTER.C) {
+          this._memory_destination |= 0xff00;
+        }
+        this._is_memory_destination = true;
+        return;
+
+      case ADDRESSING_MODE.MR_D8:
+        this.checkRegister(1);
+        this._fetched_data = this._mmu.read(this._r.pc);
+        this.cycleCPU(1);
+        this._r.pc += 1;
+        this._memory_destination = this._mmu.read(this.readRegister(this._current_instruction.r1!));
+        this._is_memory_destination = true;
+        return;
+
+      case ADDRESSING_MODE.R_MR: {
+        this.checkRegister(2);
+        let address = this.readRegister(this._current_instruction.r2!);
+        if (this._current_instruction.r1 === REGISTER.C) {
+          address |= 0xff00;
+        }
+        this._fetched_data = this._mmu.read(address);
+        this.cycleCPU(1);
+        return;
+      }
+
+      default:
+        return;
+    }
+  }
+
+  execute() {
+    const op = this.readInstruction(this._current_instruction.type);
     op();
-    this._r.pc &= 65535;
-    this._clock.m += this._r.m;
-    this._clock.t += this._r.t;
-    if (this._MMU._inbios && this._r.pc == 0x0100) this._MMU._inbios = 0;
   }
 
-  //Helper Functions
-  zeroOpF(i: number, op?: boolean) {
-    this._r.f = 0;
-    if (!(i & 255)) this._r.f |= BitIndexToHex[7];
-    this._r.f |= op ? BitIndexToHex[6] : 0;
+  init() {
+    this._r.pc = 0x100;
   }
 
-  addF() {
-    this.zeroOpF(this._r.a);
-    if (this._r.a > 255) this._r.f |= BitIndexToHex[4];
-    this._r.a &= 255;
-  }
+  step(): boolean {
+    if (!this._halted) {
+      const pc = this._r.pc;
 
-  subF() {
-    this.zeroOpF(this._r.a, true);
-    if (this._r.a < 0) this._r.f |= BitIndexToHex[4];
-    this._r.a &= 255;
-  }
+      this.fetchInstruction();
+      this.cycleCPU(1);
 
-  cpF(i: number) {
-    this.zeroOpF(i, true);
-    if (i < 0) this._r.f |= BitIndexToHex[4];
-    i &= 255; //don't think i need this but just in case
-  }
+      // const status = document.querySelector(".status") as HTMLDivElement;
+      // const line = document.createElement("p");
+      // line.innerText = `PC: ${pc.toString(16)} INSTRUCTION: ${
+      //   InstructionName[this._current_instruction.type]
+      // } CURRENT OPCODE: ${this._current_opcode.toString(16)} (${this._mmu
+      //   .read(pc + 1)
+      //   .toString(16)}, ${this._mmu.read(pc + 2).toString(16)})`;
+      // status.appendChild(line);
+      console.log(
+        "PC:",
+        pc.toString(16),
+        "INSTRUCTION:",
+        InstructionName[this._current_instruction.type],
+        "CURRENT OPCODE:",
+        this._current_opcode.toString(16),
+        "(",
+        this._mmu.read(pc + 1).toString(16),
+        ",",
+        this._mmu.read(pc + 2).toString(16),
+        ")"
+      );
 
-  rd_r({
-    r,
-    ci,
-    co,
-    dir,
-  }: {
-    r: Exclude<GeneralPurposeRegister, "f">;
-    ci: number;
-    co: number;
-    dir: "l" | "r";
-  }) {
-    this._r[r] = dir === "l" ? this._r[r] << 1 : (this._r[r] >> 1) + ci;
-    this._r[r] &= 255;
-    this._r.f = (this._r.f & ~BitIndexToHex[4]) + co;
-  }
-
-  getOp(i: number) {
-    let key = Math.floor(i / 16);
-    let index = i % 16;
-    return this._map[key][index];
-  }
-
-  getCbOp(i: number) {
-    let key = Math.floor(i / 16);
-    let index = i % 16;
-    return this._cbmap[key][index];
-  }
-
-  mapCb() {
-    let i = this._MMU.rb(this._r.pc);
-    this._r.pc++;
-    this._r.pc &= 65535;
-    let op = this.getCbOp(i);
-    if (!!op) op();
-    else alert(i);
-  }
-
-  xx() {
-    /*Undefined map entry*/
-    let opc = this._r.pc - 1;
-    alert("No instruction found for $" + opc.toString(16) + ", stopping.");
-    this._stop = 1;
-  }
-
-  //Load Ops
-  LDrr(from: Exclude<GeneralPurposeRegister, "f">, dest: Exclude<GeneralPurposeRegister, "f">) {
-    this._r[from] = this._r[dest];
-    this._r.m = 1;
-    this._r.t = 4;
-  }
-
-  LDrn(register: Exclude<GeneralPurposeRegister, "f">) {
-    this._r[register] = this._MMU.rb(this._r.pc);
-    this._r.pc += 1;
-    this._r.m = 2;
-    this._r.t = 8;
-  }
-
-  LDrHL(register: Exclude<GeneralPurposeRegister, "f">) {
-    this._r[register] = this._MMU.rb((this._r.h << 8) + this._r.l);
-    this._r.m = 2;
-    this._r.t = 8;
-  }
-
-  LDHLr(register: Exclude<GeneralPurposeRegister, "f">) {
-    this._MMU.wb((this._r.h << 8) + this._r.l, this._r[register]);
-    this._r.m = 2;
-    this._r.t = 8;
-  }
-
-  LDHLn() {
-    this._MMU.wb((this._r.h << 8) + this._r.l, this._MMU.rb(this._r.pc));
-    this._r.pc += 1;
-    this._r.m = 3;
-    this._r.t = 12;
-  }
-
-  LDA_BC() {
-    this._r.a = this._MMU.rb((this._r.b << 8) + this._r.c);
-    this._r.m = 2;
-    this._r.t = 8;
-  }
-
-  LDA_DE() {
-    this._r.a = this._MMU.rb((this._r.d << 8) + this._r.e);
-    this._r.m = 2;
-    this._r.t = 8;
-  }
-
-  LDAnn() {
-    this._r.a = this._MMU.rb(this._MMU.rw(this._r.pc));
-    this._r.pc += 2;
-    this._r.m = 4;
-    this._r.t = 16;
-  }
-
-  LDBC_A() {
-    this._MMU.wb((this._r.b << 8) + this._r.c, this._r.a);
-    this._r.m = 2;
-    this._r.t = 8;
-  }
-
-  LDDE_A() {
-    this._MMU.wb((this._r.d << 8) + this._r.e, this._r.a);
-    this._r.m = 2;
-    this._r.t = 8;
-  }
-
-  LDnnA() {
-    this._MMU.wb(this._MMU.rw(this._r.pc), this._r.a);
-    this._r.pc += 2;
-    this._r.m = 4;
-    this._r.t = 16;
-  }
-
-  LDA_FFn() {
-    this._r.a = this._MMU.rb(0xff00 + this._MMU.rb(this._r.pc));
-    this._r.pc += 1;
-    this._r.m = 3;
-    this._r.t = 12;
-  }
-
-  LDFFn_A() {
-    this._MMU.wb(0xff00 + this._MMU.rb(this._r.pc), this._r.a);
-    this._r.pc += 1;
-    this._r.m = 3;
-    this._r.t = 12;
-  }
-
-  LDA_FFC() {
-    this._r.a = this._MMU.rb(0xff00 + this._r.c);
-    this._r.m = 2;
-    this._r.t = 8;
-  }
-
-  LDFFC_A() {
-    this._MMU.wb(0xff00 + this._r.c, this._r.a);
-    this._r.m = 2;
-    this._r.t = 8;
-  }
-
-  LDHLI_A() {
-    this._MMU.wb((this._r.h << 8) + this._r.l, this._r.a);
-    this._r.l = (this._r.l + 1) & 255;
-    if (!this._r.l) {
-      this._r.h = (this._r.h + 1) & 255;
-    }
-    this._r.m = 2;
-    this._r.t = 8;
-  }
-
-  LDA_HLI() {
-    this._r.a = this._MMU.rb((this._r.h << 8) + this._r.l);
-    this._r.l = (this._r.l + 1) & 255;
-    if (!this._r.l) {
-      this._r.h = (this._r.h + 1) & 255;
-    }
-    this._r.m = 2;
-    this._r.t = 8;
-  }
-
-  LDHLD_A() {
-    this._MMU.wb((this._r.h << 8) + this._r.l, this._r.a);
-    this._r.l = (this._r.l - 1) & 255;
-    if (this._r.l == 255) {
-      this._r.h = (this._r.h - 1) & 255;
-    }
-    this._r.m = 2;
-    this._r.t = 8;
-  }
-
-  LDA_HLD() {
-    this._r.a = this._MMU.rb((this._r.h << 8) + this._r.l);
-    this._r.l = (this._r.l - 1) & 255;
-    if (this._r.l == 255) {
-      this._r.h = (this._r.h - 1) & 255;
-    }
-    this._r.m = 2;
-    this._r.t = 8;
-  }
-
-  //16 bit
-  LDrr_nn(
-    r1: Exclude<GeneralPurposeRegister, "a" & "f">,
-    r2: Exclude<GeneralPurposeRegister, "a" & "f">
-  ) {
-    this._r[r2] = this._MMU.rb(this._r.pc);
-    this._r[r1] = this._MMU.rb(this._r.pc + 1);
-    this._r.pc += 2;
-    this._r.m = 3;
-    this._r.t = 12;
-  }
-
-  LDSP_nn() {
-    this._r.sp = this._MMU.rw(this._r.pc);
-    this._r.pc += 2;
-    this._r.m = 3;
-    this._r.t = 12;
-  }
-
-  LDnn_SP() {
-    this._MMU.ww((this._r.pc << 8) + this._r.pc + 1, this._r.sp);
-    this._r.pc += 2;
-    this._r.m = 5;
-    this._r.t = 20;
-  }
-
-  LDSP_HL() {
-    this._r.sp = (this._r.h << 8) + this._r.l;
-    this._r.m = 2;
-    this._r.t = 8;
-  }
-
-  PUSHrr(r1: GeneralPurposeRegister, r2: GeneralPurposeRegister) {
-    this._r.sp--;
-    this._MMU.wb(this._r.sp, this._r[r1]);
-    this._r.sp--;
-    this._MMU.wb(this._r.sp, this._r[r2]);
-    this._r.m = 3;
-    this._r.t = 12;
-  }
-
-  POPrr(r1: GeneralPurposeRegister, r2: GeneralPurposeRegister) {
-    this._r[r2] = this._MMU.rb(this._r.sp);
-    this._r.sp++;
-    this._r[r1] = this._MMU.rb(this._r.sp);
-    this._r.sp++;
-    this._r.m = 3;
-    this._r.t = 12;
-  }
-
-  //Arithmetic Ops
-  ADDr(register: Exclude<GeneralPurposeRegister, "f">) {
-    this._r.a += this._r[register];
-    this.addF();
-    this._r.m = 1;
-    this._r.t = 4;
-  }
-
-  ADDn() {
-    this._r.a += this._MMU.rb(this._r.pc);
-    this.addF();
-    this._r.pc += 1;
-    this._r.m = 2;
-    this._r.t = 8;
-  }
-
-  ADD_HL() {
-    this._r.a += this._MMU.rb((this._r.h << 8) + this._r.l);
-    this.addF();
-    this._r.m = 2;
-    this._r.t = 8;
-  }
-
-  ADCr(register: Exclude<GeneralPurposeRegister, "f">) {
-    this._r.a += this._r[register];
-    this._r.a += this._r.f & BitIndexToHex[4] ? 1 : 0;
-    this.addF();
-    this._r.m = 1;
-    this._r.t = 4;
-  }
-
-  ADCn() {
-    this._r.a += this._MMU.rb(this._r.pc);
-    this._r.a += this._r.f & BitIndexToHex[4] ? 1 : 0;
-    this.addF();
-    this._r.pc += 1;
-    this._r.m = 2;
-    this._r.t = 8;
-  }
-
-  ADC_HL() {
-    this._r.a += this._MMU.rb((this._r.h << 8) + this._r.l);
-    this._r.a += this._r.f & BitIndexToHex[4] ? 1 : 0;
-    this.addF();
-    this._r.m = 2;
-    this._r.t = 8;
-  }
-
-  SUBr(register: Exclude<GeneralPurposeRegister, "f">) {
-    this._r.a -= this._r[register];
-    this.subF();
-    this._r.m = 1;
-    this._r.t = 4;
-  }
-
-  SUBn() {
-    this._r.a -= this._MMU.rb(this._r.pc);
-    this.subF();
-    this._r.pc += 1;
-    this._r.m = 2;
-    this._r.t = 8;
-  }
-
-  SUB_HL() {
-    this._r.a -= this._MMU.rb((this._r.h << 8) + this._r.l);
-    this.subF();
-    this._r.m = 2;
-    this._r.t = 8;
-  }
-
-  SBCr(register: Exclude<GeneralPurposeRegister, "f">) {
-    this._r.a -= this._r[register];
-    this._r.a -= this._r.f & BitIndexToHex[4] ? 1 : 0;
-    this.subF();
-    this._r.m = 1;
-    this._r.t = 4;
-  }
-
-  SBCn() {
-    this._r.a -= this._MMU.rb(this._r.pc);
-    this._r.a -= this._r.f & BitIndexToHex[4] ? 1 : 0;
-    this.subF();
-    this._r.pc += 1;
-    this._r.m = 2;
-    this._r.t = 8;
-  }
-
-  SBC_HL() {
-    this._r.a -= this._MMU.rb((this._r.h << 8) + this._r.l);
-    this._r.a -= this._r.f & BitIndexToHex[4] ? 1 : 0;
-    this.subF();
-    this._r.m = 2;
-    this._r.t = 8;
-  }
-
-  ANDr(register: Exclude<GeneralPurposeRegister, "f">) {
-    this._r.a &= this._r[register];
-    this.zeroOpF(this._r.a);
-    this._r.a &= 255;
-    this._r.m = 1;
-    this._r.t = 4;
-  }
-
-  ANDn() {
-    this._r.a &= this._MMU.rb(this._r.pc);
-    this.zeroOpF(this._r.a);
-    this._r.a &= 255;
-    this._r.pc += 1;
-    this._r.m = 2;
-    this._r.t = 8;
-  }
-
-  AND_HL() {
-    this._r.a &= this._MMU.rb((this._r.h << 8) + this._r.l);
-    this.zeroOpF(this._r.a);
-    this._r.a &= 255;
-    this._r.m = 2;
-    this._r.t = 8;
-  }
-
-  XORr(register: Exclude<GeneralPurposeRegister, "f">) {
-    this._r.a ^= this._r[register];
-    this.zeroOpF(this._r.a);
-    this._r.a &= 255;
-    this._r.m = 1;
-    this._r.t = 4;
-  }
-
-  XORn() {
-    this._r.a ^= this._MMU.rb(this._r.pc);
-    this.zeroOpF(this._r.a);
-    this._r.a &= 255;
-    this._r.pc += 1;
-    this._r.m = 2;
-    this._r.t = 8;
-  }
-
-  XOR_HL() {
-    this._r.a ^= this._MMU.rb((this._r.h << 8) + this._r.l);
-    this.zeroOpF(this._r.a);
-    this._r.a &= 255;
-    this._r.m = 2;
-    this._r.t = 8;
-  }
-
-  ORr(register: Exclude<GeneralPurposeRegister, "f">) {
-    this._r.a |= this._r[register];
-    this.zeroOpF(this._r.a);
-    this._r.a &= 255;
-    this._r.m = 1;
-    this._r.t = 4;
-  }
-
-  ORn() {
-    this._r.a |= this._MMU.rb(this._r.pc);
-    this.zeroOpF(this._r.a);
-    this._r.a &= 255;
-    this._r.pc += 1;
-    this._r.m = 2;
-    this._r.t = 8;
-  }
-
-  OR_HL() {
-    this._r.a |= this._MMU.rb((this._r.h << 8) + this._r.l);
-    this.zeroOpF(this._r.a);
-    this._r.a &= 255;
-    this._r.m = 2;
-    this._r.t = 8;
-  }
-
-  CPr(register: Exclude<GeneralPurposeRegister, "f">) {
-    let i = this._r.a - this._r[register];
-    this.cpF(i);
-    this._r.m = 1;
-    this._r.t = 4;
-  }
-
-  CPn() {
-    let i = this._r.a - this._MMU.rb(this._r.pc);
-    this.cpF(i);
-    this._r.pc += 1;
-    this._r.m = 2;
-    this._r.t = 8;
-  }
-
-  CP_HL() {
-    let i = this._r.a - this._MMU.rb((this._r.h << 8) + this._r.l);
-    this.cpF(i);
-    this._r.m = 2;
-    this._r.t = 8;
-  }
-
-  INCr(register: Exclude<GeneralPurposeRegister, "f">) {
-    this._r[register] += 1;
-    this.zeroOpF(this._r[register]);
-    this._r[register] &= 255;
-    this._r.m = 1;
-    this._r.t = 4;
-  }
-
-  INC_HL() {
-    let i = this._MMU.rb((this._r.h << 8) + this._r.l) + 1;
-    this._MMU.wb((this._r.h << 8) + this._r.l, i);
-    this.zeroOpF(i);
-    i &= 255;
-    this._r.m = 3;
-    this._r.t = 12;
-  }
-
-  DECr(register: Exclude<GeneralPurposeRegister, "f">) {
-    this._r[register] -= 1;
-    this.zeroOpF(this._r[register]);
-    this._r[register] &= 255;
-    this._r.m = 1;
-    this._r.t = 4;
-  }
-
-  DEC_HL() {
-    let i = this._MMU.rb((this._r.h << 8) + this._r.l) - 1;
-    this._MMU.wb((this._r.h << 8) + this._r.l, i);
-    this.zeroOpF(i);
-    i &= 255;
-    this._r.m = 3;
-    this._r.t = 12;
-  }
-
-  DAA() {
-    if (this._r.f & BitIndexToHex[6]) {
-      if (this._r.f & BitIndexToHex[4]) {
-        this._r.a -= 0x60;
-      }
-      if (this._r.f & BitIndexToHex[5]) {
-        this._r.a -= 0x06;
-      }
+      this.fetchData();
+      this.execute();
     } else {
-      if (this._r.f & BitIndexToHex[4] || (this._r.a & 0xff) > 0x99) {
-        this._r.a += 0x60;
-        this._r.f |= BitIndexToHex[4];
-      }
-      if (this._r.f & BitIndexToHex[5] || (this._r.a & 0x0f) > 0x09) {
-        this._r.a += 0x06;
+      this.cycleCPU(1);
+      if (this._r.i) {
+        this._halted = false;
       }
     }
 
-    this._r.f |= this._r.a == 0 ? BitIndexToHex[7] : 0;
-    this._r.f = this._r.f & ~BitIndexToHex[5];
+    if (this._interrupt_me) {
+      this.handleInterrupt();
+      this._enabling_interrupt_me = false;
+    }
+
+    if (this._enabling_interrupt_me) {
+      this._interrupt_me = true;
+    }
+
+    return true;
   }
 
-  CPL() {
-    this._r.a = ~this._r.a & 255;
-    this.zeroOpF(this._r.a, true);
-    this._r.m = 1;
-    this._r.t = 4;
+  callInterrupt(addr: number, interrupt: INTERRUPT_TYPE) {
+    this.stackPush16(this._r.pc);
+    this.writeRegister(this._r.pc, addr);
+    this.writeRegister(this._r.i, this._r.i & ~interrupt);
+    this._halted = false;
+    this._interrupt_me = false;
   }
 
-  //16 bit
-  ADD_HLrr(
-    r1: Exclude<GeneralPurposeRegister, "a" & "f">,
-    r2: Exclude<GeneralPurposeRegister, "a" & "f">
-  ) {
-    let hl = (this._r.h << 8) + this._r.l;
-    hl += (this._r[r1] << 8) + this._r[r2];
-    if (hl > 65535) this._r.f |= BitIndexToHex[4];
-    else this._r.f &= ~BitIndexToHex[4];
-    this._r.h = (hl >> 8) & 255;
-    this._r.l = hl & 255;
-    this._r.m = 3;
-    this._r.t = 12;
+  checkInterrupt(interrupt: INTERRUPT_TYPE) {
+    if (this._r.i & interrupt && this._r.ie & interrupt) {
+      return true;
+    }
+    return false;
   }
 
-  ADDHL_SP() {
-    let hl = (this._r.h << 8) + this._r.l;
-    hl += this._r.sp;
-    if (hl > 65535) this._r.f |= BitIndexToHex[4];
-    else this._r.f &= ~BitIndexToHex[4];
-    this._r.h = (hl >> 8) & 255;
-    this._r.l = hl & 255;
-    this._r.m = 3;
-    this._r.t = 12;
-  }
-
-  INCrr(r1: Exclude<GeneralPurposeRegister, "f">, r2: Exclude<GeneralPurposeRegister, "f">) {
-    this._r[r2] = (this._r[r2] + 1) & 255;
-    if (!this._r[r2]) this._r[r1] = (this._r[r1] + 1) & 255;
-    this._r.m = 1;
-    this._r.t = 4;
-  }
-
-  INC_SP() {
-    this._r.sp = (this._r.sp + 1) & 65535;
-    this._r.m = 1;
-    this._r.t = 4;
-  }
-
-  DECrr(r1: Exclude<GeneralPurposeRegister, "f">, r2: Exclude<GeneralPurposeRegister, "f">) {
-    this._r[r2] = (this._r[r2] - 1) & 255;
-    if (this._r[r2] == 255) this._r[r1] = (this._r[r1] - 1) & 255;
-    this._r.m = 1;
-    this._r.t = 4;
-  }
-
-  DEC_SP() {
-    this._r.sp = (this._r.sp - 1) & 65535;
-    this._r.m = 1;
-    this._r.t = 4;
-  }
-
-  ADDSP_e() {
-    let i = this._MMU.rb(this._r.pc);
-    if (i > 127) i = -((~i + 1) & 255);
-    this._r.pc += 1;
-    this._r.sp += i;
-    this._r.m = 4;
-    this._r.t = 16;
-  }
-
-  LDHL_SPe() {
-    let i = this._MMU.rb(this._r.pc);
-    if (i > 127) i = -((~i + 1) & 255);
-    this._r.pc += 1;
-    i += this._r.sp;
-    this._r.h = (i >> 8) & 255;
-    this._r.l = i & 255;
-    this._r.m = 3;
-    this._r.t = 12;
-  }
-
-  //Rotate and Shift Ops
-  RLCA() {
-    let ci = this._r.a & BitIndexToHex[7] ? 1 : 0;
-    let co = this._r.a & BitIndexToHex[7] ? BitIndexToHex[4] : 0;
-    this.rd_r({ r: "a", ci, co, dir: "l" });
-    this._r.m = 1;
-    this._r.t = 4;
-  }
-
-  RLA() {
-    let ci = this._r.f & BitIndexToHex[4] ? 1 : 0;
-    let co = this._r.a & BitIndexToHex[7] ? BitIndexToHex[4] : 0;
-    this.rd_r({ r: "a", ci, co, dir: "l" });
-    this._r.m = 1;
-    this._r.t = 4;
-  }
-
-  RRCA() {
-    let ci = this._r.a & 1 ? BitIndexToHex[7] : 0;
-    let co = this._r.a & 1 ? BitIndexToHex[4] : 0;
-    this.rd_r({ r: "a", ci, co, dir: "r" });
-    this._r.m = 1;
-    this._r.t = 4;
-  }
-
-  RRA() {
-    let ci = this._r.f & BitIndexToHex[4] ? BitIndexToHex[7] : 0;
-    let co = this._r.a & 1 ? BitIndexToHex[4] : 0;
-    this.rd_r({ r: "a", ci, co, dir: "r" });
-    this._r.m = 1;
-    this._r.t = 4;
-  }
-
-  RLCr(register: Exclude<GeneralPurposeRegister, "f">) {
-    let ci = this._r[register] & BitIndexToHex[7] ? 1 : 0;
-    let co = this._r[register] & BitIndexToHex[7] ? BitIndexToHex[4] : 0;
-    this.rd_r({ r: register, ci, co, dir: "l" });
-    this._r.m = 2;
-    this._r.t = 8;
-  }
-
-  RLC_HL() {
-    let hl = this._MMU.rb((this._r.h << 8) + this._r.l);
-    let ci = hl & BitIndexToHex[7] ? 1 : 0;
-    let co = hl & BitIndexToHex[7] ? BitIndexToHex[4] : 0;
-    hl = (hl << 1) + ci;
-    hl &= 255;
-    this._r.f = (this._r.f & ~BitIndexToHex[4]) + co;
-    this._MMU.wb((this._r.h << 8) + this._r.l, hl);
-    this._r.m = 4;
-    this._r.t = 16;
-  }
-
-  RLr(register: Exclude<GeneralPurposeRegister, "f">) {
-    let ci = this._r.f & BitIndexToHex[4] ? 1 : 0;
-    let co = this._r[register] & BitIndexToHex[7] ? BitIndexToHex[4] : 0;
-    this.rd_r({ r: register, ci, co, dir: "l" });
-    this._r.m = 2;
-    this._r.t = 8;
-  }
-
-  RL_HL() {
-    let hl = this._MMU.rb((this._r.h << 8) + this._r.l);
-    let ci = this._r.f & BitIndexToHex[4] ? 1 : 0;
-    let co = hl & BitIndexToHex[7] ? BitIndexToHex[4] : 0;
-    hl = (hl << 1) + ci;
-    hl &= 255;
-    this._r.f = (this._r.f & ~BitIndexToHex[4]) + co;
-    this._MMU.wb((this._r.h << 8) + this._r.l, hl);
-    this._r.m = 4;
-    this._r.t = 16;
-  }
-
-  RRCr(register: Exclude<GeneralPurposeRegister, "f">) {
-    let ci = this._r[register] & 1 ? BitIndexToHex[7] : 0;
-    let co = this._r[register] & 1 ? BitIndexToHex[4] : 0;
-    this.rd_r({ r: register, ci, co, dir: "r" });
-    this._r.m = 2;
-    this._r.t = 8;
-  }
-
-  RRC_HL() {
-    let hl = this._MMU.rb((this._r.h << 8) + this._r.l);
-    let ci = hl & 1 ? BitIndexToHex[7] : 0;
-    let co = hl & 1 ? BitIndexToHex[4] : 0;
-    hl = (hl >> 1) + ci;
-    hl &= 255;
-    this._r.f = (this._r.f & ~BitIndexToHex[4]) + co;
-    this._MMU.wb((this._r.h << 8) + this._r.l, hl);
-    this._r.m = 4;
-    this._r.t = 16;
-  }
-
-  RRr(register: Exclude<GeneralPurposeRegister, "f">) {
-    let ci = this._r.f & BitIndexToHex[4] ? BitIndexToHex[7] : 0;
-    let co = this._r[register] & 1 ? BitIndexToHex[4] : 0;
-    this.rd_r({ r: register, ci, co, dir: "r" });
-    this._r.m = 2;
-    this._r.t = 8;
-  }
-
-  RR_HL() {
-    let hl = this._MMU.rb((this._r.h << 8) + this._r.l);
-    let ci = this._r.f & BitIndexToHex[4] ? BitIndexToHex[7] : 0;
-    let co = hl & 1 ? BitIndexToHex[4] : 0;
-    hl = (hl >> 1) + ci;
-    hl &= 255;
-    this._r.f = (this._r.f & ~BitIndexToHex[4]) + co;
-    this._MMU.wb((this._r.h << 8) + this._r.l, hl);
-    this._r.m = 4;
-    this._r.t = 16;
-  }
-
-  SLAr(register: Exclude<GeneralPurposeRegister, "f">) {
-    let co = this._r[register] & BitIndexToHex[7] ? BitIndexToHex[4] : 0;
-    this._r[register] = this._r[register] << 1;
-    this._r[register] &= 255;
-    this._r.f = (this._r.f & ~BitIndexToHex[4]) + co;
-    this._r.m = 2;
-    this._r.t = 8;
-  }
-
-  SLA_HL() {
-    let hl = this._MMU.rb((this._r.h << 8) + this._r.l);
-    let co = hl & BitIndexToHex[7] ? BitIndexToHex[4] : 0;
-    hl = hl << 1;
-    hl &= 255;
-    this._r.f = (this._r.f & ~BitIndexToHex[4]) + co;
-    this._MMU.wb((this._r.h << 8) + this._r.l, hl);
-    this._r.m = 4;
-    this._r.t = 16;
-  }
-
-  SWAPr(register: Exclude<GeneralPurposeRegister, "f">) {
-    let i = this._r[register];
-    let ln = i & 0x0f;
-    let hn = (i & 0xf0) >> 4;
-    this._r[register] = (ln << 4) | hn;
-    this._r.m = 4;
-    this._r.t = 16;
-  }
-
-  SWAP_HL() {
-    let i = this._MMU.rb((this._r.h << 8) + this._r.l);
-    let ln = i & 0x0f;
-    let hn = (i & 0xf0) >> 4;
-    this._MMU.wb((this._r.h << 8) + this._r.l, (ln << 4) | hn);
-    this._r.m = 4;
-    this._r.t = 16;
-  }
-
-  SRAr(register: Exclude<GeneralPurposeRegister, "f">) {
-    let ci = this._r[register] & BitIndexToHex[7];
-    let co = this._r[register] & 1 ? BitIndexToHex[4] : 0;
-    this._r[register] = this._r[register] >> 1;
-    this._r[register] += ci;
-    this._r[register] &= 255;
-    this._r.f = (this._r.f & ~BitIndexToHex[4]) + co;
-    this._r.m = 2;
-    this._r.t = 8;
-  }
-
-  SRA_HL() {
-    let hl = this._MMU.rb((this._r.h << 8) + this._r.l);
-    let ci = hl & BitIndexToHex[7];
-    let co = hl & 1 ? BitIndexToHex[4] : 0;
-    hl = hl >> 1;
-    hl += ci;
-    hl &= 255;
-    this._r.f = (this._r.f & ~BitIndexToHex[4]) + co;
-    this._MMU.wb((this._r.h << 8) + this._r.l, hl);
-    this._r.m = 4;
-    this._r.t = 16;
-  }
-
-  SRLr(register: Exclude<GeneralPurposeRegister, "f">) {
-    let co = this._r[register] & 1 ? BitIndexToHex[4] : 0;
-    this._r[register] = this._r[register] >> 1;
-    this._r[register] = this._r[register] & ~(1 << BitIndexToHex[7]);
-    this._r[register] &= 255;
-    this._r.f = (this._r.f & ~BitIndexToHex[4]) + co;
-    this._r.m = 2;
-    this._r.t = 8;
-  }
-
-  SRL_HL() {
-    let hl = this._MMU.rb((this._r.h << 8) + this._r.l);
-    let co = hl & 1 ? BitIndexToHex[4] : 0;
-    hl = hl >> 1;
-    hl = hl & ~(1 << BitIndexToHex[7]);
-    hl &= 255;
-    this._r.f = (this._r.f & ~BitIndexToHex[4]) + co;
-    this._MMU.wb((this._r.h << 8) + this._r.l, hl);
-    this._r.m = 4;
-    this._r.t = 16;
-  }
-
-  //Bit Ops
-  BITbr(i: BitIndex, register: Exclude<GeneralPurposeRegister, "f">) {
-    this.zeroOpF(this._r[register] & BitIndexToHex[i]);
-    this._r.m = 2;
-    this._r.t = 8;
-  }
-
-  BITb_HL(i: BitIndex) {
-    this.zeroOpF(this._MMU.rb((this._r.h << 8) + this._r.l) & BitIndexToHex[i]);
-    this._r.m = 3;
-    this._r.t = 12;
-  }
-
-  SETbr(i: BitIndex, register: Exclude<GeneralPurposeRegister, "f">) {
-    this._r[register] |= 1 << BitIndexToHex[i];
-    this.zeroOpF(this._r[register]);
-    this._r.m = 2;
-    this._r.t = 8;
-  }
-
-  SETb_HL(i: BitIndex) {
-    let hl = this._MMU.rb((this._r.h << 8) + this._r.l);
-    hl |= 1 << BitIndexToHex[i];
-    this.zeroOpF(hl);
-    this._MMU.wb((this._r.h << 8) + this._r.l, hl);
-    this._r.m = 4;
-    this._r.t = 16;
-  }
-
-  RESbr(i: BitIndex, register: Exclude<GeneralPurposeRegister, "f">) {
-    this._r[register] = this._r[register] & ~(1 << BitIndexToHex[i]);
-    this.zeroOpF(this._r[register]);
-    this._r.m = 4;
-    this._r.t = 16;
-  }
-
-  RESb_HL(i: BitIndex) {
-    let hl = this._MMU.rb((this._r.h << 8) + this._r.l);
-    hl = hl & ~(1 << BitIndexToHex[i]);
-    this.zeroOpF(hl);
-    this._MMU.wb((this._r.h << 8) + this._r.l, hl);
-    this._r.m = 4;
-    this._r.t = 16;
-  }
-
-  //Control Ops
-  CCF() {
-    let ci = this._r.f & BitIndexToHex[4] ? 0 : BitIndexToHex[4];
-    this._r.f = (this._r.f & ~BitIndexToHex[4]) + ci;
-    this._r.m = 1;
-    this._r.t = 4;
-  }
-
-  SCF() {
-    this._r.f |= 0x10;
-    this._r.m = 1;
-    this._r.t = 4;
+  handleInterrupt() {
+    if (this.checkInterrupt(INTERRUPT_TYPE.VBLANK)) {
+      this.callInterrupt(0x40, INTERRUPT_TYPE.VBLANK);
+    } else if (this.checkInterrupt(INTERRUPT_TYPE.LCD_STAT)) {
+      this.callInterrupt(0x48, INTERRUPT_TYPE.LCD_STAT);
+    } else if (this.checkInterrupt(INTERRUPT_TYPE.TIMER)) {
+      this.callInterrupt(0x50, INTERRUPT_TYPE.TIMER);
+    } else if (this.checkInterrupt(INTERRUPT_TYPE.SERIAL)) {
+      this.callInterrupt(0x58, INTERRUPT_TYPE.SERIAL);
+    } else if (this.checkInterrupt(INTERRUPT_TYPE.JOYPAD)) {
+      this.callInterrupt(0x60, INTERRUPT_TYPE.JOYPAD);
+    }
   }
 
   NOP() {
-    this._r.m = 1;
-    this._r.t = 4;
+    return;
   }
 
-  HALT() {
-    this._halt = 1;
-    this._r.m = 1;
-    this._r.t = 4;
+  LD() {
+    if (this._is_memory_destination) {
+      if (this._current_instruction.r2! >= REGISTER.AF) {
+        this.cycleCPU(1);
+        this._mmu.write16(this._memory_destination, this._fetched_data);
+      } else {
+        this._mmu.write(this._memory_destination, this._fetched_data);
+      }
+      this.cycleCPU(1);
+      return;
+    }
+
+    if (this._current_instruction.mode === ADDRESSING_MODE.HL_SPR) {
+      const shouldSetHFlag =
+        (this.readRegister(this._current_instruction.r2!) & 0xf) + (this._fetched_data & 0xf) >=
+        0x10;
+
+      const shouldSetCFlag =
+        (this.readRegister(this._current_instruction.r2!) & 0xff) + (this._fetched_data & 0xff) >=
+        0x100;
+
+      if (shouldSetHFlag) {
+        setBit({ n: this._r.f, bit: 5, val: 1 });
+      }
+
+      if (shouldSetCFlag) {
+        setBit({ n: this._r.f, bit: 4, val: 1 });
+      }
+
+      this.writeRegister(
+        this._current_instruction.r1!,
+        this.readRegister(this._current_instruction.r2!) + this._fetched_data
+      );
+
+      return;
+    }
+
+    this.writeRegister(this._current_instruction.r1!, this._fetched_data);
   }
 
-  STOP() {
-    this._stop = 1;
-    this._r.m = 1;
-    this._r.t = 4;
-  }
-
-  DI() {
-    this._r.ime = 0;
-    this._r.m = 1;
-    this._r.t = 4;
-  }
-
-  EI() {
-    this._r.ime = 1;
-    this._r.m = 1;
-    this._r.t = 4;
-  }
-
-  //Jump, Call and Return
-  JPnn() {
-    this._r.pc = this._MMU.rw(this._r.pc);
-    this._r.m = 3;
-    this._r.t = 12;
-  }
-
-  JP_HL() {
-    this._r.pc = this._MMU.rb((this._r.h << 8) + this._r.l);
-    this._r.m = 1;
-    this._r.t = 4;
-  }
-
-  JPNZ_nn() {
-    this._r.m = 3;
-    this._r.t = 12;
-    if ((this._r.f & BitIndexToHex[7]) == 0) {
-      this._r.pc = this._MMU.rw(this._r.pc);
-      this._r.m += 1;
-      this._r.t += 4;
+  LDH() {
+    if (this._current_instruction.r1 == REGISTER.A) {
+      this.writeRegister(this._current_instruction.r1, this._mmu.read(0xff00 | this._fetched_data));
     } else {
-      this._r.pc += 2;
+      this._mmu.write(0xff00 | this._fetched_data, this._r.a);
     }
+    this.cycleCPU(1);
   }
 
-  JPZ_nn() {
-    this._r.m = 3;
-    this._r.t = 12;
-    if ((this._r.f & BitIndexToHex[7]) == BitIndexToHex[7]) {
-      this._r.pc = this._MMU.rw(this._r.pc);
-      this._r.m += 1;
-      this._r.t += 4;
+  PUSH() {
+    const high = (this.readRegister(this._current_instruction.r1!) >> 8) & 0xff;
+    this.cycleCPU(1);
+    this.stackPush(high);
+    const low = this.readRegister(this._current_instruction.r1!) & 0xff;
+    this.cycleCPU(1);
+    this.stackPush(low);
+    this.cycleCPU(1);
+  }
+
+  POP() {
+    const low = this.stackPop();
+    this.cycleCPU(1);
+    const high = this.stackPop();
+    this.cycleCPU(1);
+    const val = (high << 8) | low;
+    if (this._current_instruction.r1 === REGISTER.AF) {
+      this.writeRegister(this._current_instruction.r1, val & 0xfff0);
     } else {
-      this._r.pc += 2;
+      this.writeRegister(this._current_instruction.r1!, val);
     }
   }
 
-  JPNC_nn() {
-    this._r.m = 3;
-    this._r.t = 12;
-    if ((this._r.f & BitIndexToHex[4]) == 0) {
-      this._r.pc = this._MMU.rw(this._r.pc);
-      this._r.m += 1;
-      this._r.t += 4;
-    } else {
-      this._r.pc += 2;
+  JP() {
+    if (this.checkCondition()) {
+      this._r.pc = this._fetched_data;
+      this.cycleCPU(1);
     }
   }
 
-  JPC_nn() {
-    this._r.m = 3;
-    this._r.t = 12;
-    if ((this._r.f & BitIndexToHex[4]) == BitIndexToHex[4]) {
-      this._r.pc = this._MMU.rw(this._r.pc);
-      this._r.m += 1;
-      this._r.t += 4;
-    } else {
-      this._r.pc += 2;
+  JR() {
+    if (this.checkCondition()) {
+      const rel = this._fetched_data & 0xff;
+      this._r.pc = this._fetched_data + rel;
+      this.cycleCPU(1);
     }
   }
 
-  JRe() {
-    let i = this._MMU.rb(this._r.pc);
-    if (i > 127) i = -((~i + 1) & 255);
-    this._r.pc += 1;
-    this._r.pc += i;
-    this._r.m = 3;
-    this._r.t = 12;
-  }
-
-  JRNZ_e() {
-    let i = this._MMU.rb(this._r.pc);
-    if (i > 127) i = -((~i + 1) & 255);
-    this._r.pc += 1;
-    this._r.m = 2;
-    this._r.t = 8;
-    if ((this._r.f & BitIndexToHex[7]) == 0) {
-      this._r.pc += i;
-      this._r.m += 1;
-      this._r.t += 4;
-    } else {
-      this._r.pc += 2;
-    }
-  }
-
-  JRZ_e() {
-    let i = this._MMU.rb(this._r.pc);
-    if (i > 127) i = -((~i + 1) & 255);
-    this._r.pc += 1;
-    this._r.m = 2;
-    this._r.t = 8;
-    if ((this._r.f & BitIndexToHex[7]) == BitIndexToHex[7]) {
-      this._r.pc += i;
-      this._r.m += 1;
-      this._r.t += 4;
-    }
-  }
-
-  JRNC_e() {
-    let i = this._MMU.rb(this._r.pc);
-    if (i > 127) i = -((~i + 1) & 255);
-    this._r.pc += 1;
-    this._r.m = 2;
-    this._r.t = 8;
-    if ((this._r.f & BitIndexToHex[4]) == 0) {
-      this._r.pc += i;
-      this._r.m += 1;
-      this._r.t += 4;
-    } else {
-      this._r.pc += 2;
-    }
-  }
-
-  JRC_e() {
-    let i = this._MMU.rb(this._r.pc);
-    if (i > 127) i = -((~i + 1) & 255);
-    this._r.pc += 1;
-    this._r.m = 2;
-    this._r.t = 8;
-    if ((this._r.f & BitIndexToHex[4]) == BitIndexToHex[4]) {
-      this._r.pc += i;
-      this._r.m += 1;
-      this._r.t += 4;
-    }
-  }
-
-  CALLnn() {
-    this._r.sp -= 2;
-    this._MMU.ww(this._r.sp, this._r.pc + 2);
-    this._r.pc = this._MMU.rw(this._r.pc);
-    this._r.m = 5;
-    this._r.t = 20;
-  }
-
-  CALLNZ_nn() {
-    this._r.m = 3;
-    this._r.t = 12;
-    if ((this._r.f & BitIndexToHex[7]) == 0) {
-      this._r.sp -= 2;
-      this._MMU.ww(this._r.sp, this._r.pc + 2);
-      this._r.pc = this._MMU.rw(this._r.pc);
-      this._r.m += 2;
-      this._r.t += 8;
-    } else {
-      this._r.pc += 2;
-    }
-  }
-
-  CALLZ_nn() {
-    this._r.m = 3;
-    this._r.t = 12;
-    if ((this._r.f & BitIndexToHex[7]) == BitIndexToHex[7]) {
-      this._r.sp -= 2;
-      this._MMU.ww(this._r.sp, this._r.pc + 2);
-      this._r.pc = this._MMU.rw(this._r.pc);
-      this._r.m += 2;
-      this._r.t += 8;
-    } else {
-      this._r.pc += 2;
-    }
-  }
-
-  CALLNC_nn() {
-    this._r.m = 3;
-    this._r.t = 12;
-    if ((this._r.f & BitIndexToHex[4]) == 0) {
-      this._r.sp -= 2;
-      this._MMU.ww(this._r.sp, this._r.pc + 2);
-      this._r.pc = this._MMU.rw(this._r.pc);
-      this._r.m += 2;
-      this._r.t += 8;
-    } else {
-      this._r.pc += 2;
-    }
-  }
-
-  CALLC_nn() {
-    this._r.m = 3;
-    this._r.t = 12;
-    if ((this._r.f & BitIndexToHex[4]) == BitIndexToHex[4]) {
-      this._r.sp -= 2;
-      this._MMU.ww(this._r.sp, this._r.pc + 2);
-      this._r.pc = this._MMU.rw(this._r.pc);
-      this._r.m += 2;
-      this._r.t += 8;
-    } else {
-      this._r.pc += 2;
+  CALL() {
+    if (this.checkCondition()) {
+      this.stackPush16(this._r.pc);
+      this.cycleCPU(2);
+      this._r.pc = this._fetched_data;
+      this.cycleCPU(1);
     }
   }
 
   RET() {
-    this._r.pc = this._MMU.rw(this._r.sp);
-    this._r.sp += 2;
-    this._r.m = 3;
-    this._r.t = 12;
-  }
-
-  RETNZ() {
-    this._r.m = 1;
-    this._r.t = 4;
-    if ((this._r.f & BitIndexToHex[7]) == 0) {
-      this._r.pc = this._MMU.rw(this._r.sp);
-      this._r.sp += 2;
-      this._r.m += 2;
-      this._r.t += 8;
+    if (this._current_instruction.condition !== CONDITION_TYPE.NONE) {
+      this.cycleCPU(1);
     }
-  }
 
-  RETZ() {
-    this._r.m = 1;
-    this._r.t = 4;
-    if ((this._r.f & BitIndexToHex[7]) == BitIndexToHex[7]) {
-      this._r.pc = this._MMU.rw(this._r.sp);
-      this._r.sp += 2;
-      this._r.m += 2;
-      this._r.t += 8;
-    }
-  }
-
-  RETNC() {
-    this._r.m = 1;
-    this._r.t = 4;
-    if ((this._r.f & BitIndexToHex[4]) == 0) {
-      this._r.pc = this._MMU.rw(this._r.sp);
-      this._r.sp += 2;
-      this._r.m += 2;
-      this._r.t += 8;
-    }
-  }
-
-  RETC() {
-    this._r.m = 1;
-    this._r.t = 4;
-    if ((this._r.f & BitIndexToHex[4]) == BitIndexToHex[4]) {
-      this._r.pc = this._MMU.rw(this._r.sp);
-      this._r.sp += 2;
-      this._r.m += 2;
-      this._r.t += 8;
+    if (this.checkCondition()) {
+      const low = this.stackPop();
+      this.cycleCPU(1);
+      const high = this.stackPop();
+      this.cycleCPU(1);
+      const val = (high << 8) | low;
+      this._r.pc = val;
+      this.cycleCPU(1);
     }
   }
 
   RETI() {
-    this._r.ime = 1;
-    this._r.pc = this._MMU.rw(this._r.sp);
-    this._r.sp += 2;
-    this._r.m = 3;
-    this._r.t = 12;
+    this._interrupt_me = true;
+    this.RET();
   }
 
-  RST_N(n: number) {
-    this._r.sp -= 2;
-    this._MMU.ww(this._r.sp, this._r.pc);
-    this._r.pc = n;
-    this._r.m = 3;
-    this._r.t = 12;
+  RST() {
+    if (this._current_instruction.param === undefined) {
+      throw Error("Execution Error: No parameter supplied.");
+    }
+    if (this.checkCondition()) {
+      this._r.pc = this._current_instruction.param;
+      this.stackPush16(this._r.pc);
+      this.cycleCPU(3);
+    }
   }
+
+  INC() {
+    let val;
+
+    if (this._current_instruction.r1! >= REGISTER.AF) {
+      this.cycleCPU(1);
+    }
+
+    if (
+      this._current_instruction.r1 === REGISTER.HL &&
+      this._current_instruction.mode === ADDRESSING_MODE.MR
+    ) {
+      val = this._mmu.read(this.readRegister(REGISTER.HL)) + 1;
+      val &= 0xff;
+      this._mmu.write(this.readRegister(REGISTER.HL), val);
+    } else {
+      val = this.readRegister(this._current_instruction.r1!) + 1;
+      this.writeRegister(this._current_instruction.r1!, val);
+    }
+
+    if ((this._current_opcode & 0x03) === 0x03) return;
+
+    this.setFlags({ h: (val & 0x0f) === 0 ? 1 : 0, n: 0, z: val === 0 ? 1 : 0 });
+  }
+
+  DEC() {
+    let val;
+
+    if (this._current_instruction.r1! >= REGISTER.AF) {
+      this.cycleCPU(1);
+    }
+
+    if (
+      this._current_instruction.r1 === REGISTER.HL &&
+      this._current_instruction.mode === ADDRESSING_MODE.MR
+    ) {
+      val = this._mmu.read(this.readRegister(REGISTER.HL)) - 1;
+      val &= 0xff;
+      this._mmu.write(this.readRegister(REGISTER.HL), val);
+    } else {
+      val = this.readRegister(this._current_instruction.r1!) - 1;
+      this.writeRegister(this._current_instruction.r1!, val);
+    }
+
+    if ((this._current_opcode & 0x0b) === 0x0b) return;
+
+    this.setFlags({ h: (val & 0x0f) === 0x0f ? 1 : 0, n: 1, z: val === 0 ? 1 : 0 });
+  }
+
+  ADD() {
+    const r1 = this.readRegister(this._current_instruction.r1!);
+    const i = this._fetched_data;
+    const val = r1 + i;
+
+    let z: null | boolean = (val & 0xff) === 0;
+    let h = (r1 & 0xf) + (i & 0xf) >= 0x10;
+    let c = (r1 & 0xff) + (i & 0xff) >= 0x100;
+
+    const is16bit = this._current_instruction.r2! >= REGISTER.AF;
+
+    if (this._current_instruction.r2 === REGISTER.SP) {
+      this.cycleCPU(1);
+      z = false;
+    } else if (is16bit) {
+      this.cycleCPU(1);
+      z = null;
+      h = (r1 & 0xfff) + (i & 0xfff) >= 0x1000;
+
+      c = r1 + i >= 0x10000;
+    }
+
+    this.writeRegister(this._current_instruction.r1!, val);
+    this.setFlags({ c: c ? 1 : 0, h: h ? 1 : 0, n: 0, z: z ? 1 : 0 });
+  }
+
+  ADC() {
+    const r1 = this.readRegister(this._current_instruction.r1!);
+    const i = this._fetched_data;
+    const c = this.getCFlag();
+    const val = r1 + i + c;
+    this.writeRegister(this._current_instruction.r1!, val & 0xff);
+    this.setFlags({
+      c: val > 0xff ? 1 : 0,
+      h: (r1 & 0xf) + (i & 0xf) + c > 0xf ? 1 : 0,
+      n: 0,
+      z: (val & 0xff) === 0 ? 1 : 0,
+    });
+  }
+
+  SUB() {
+    const r1 = this.readRegister(this._current_instruction.r1!);
+    const i = this._fetched_data;
+    const val = r1 - i;
+    this.writeRegister(this._current_instruction.r1!, val & 0xff);
+    this.setFlags({
+      c: val < 0 ? 1 : 0,
+      h: (r1 & 0xf) + (i & 0xf) < 0 ? 1 : 0,
+      n: 1,
+      z: (val & 0xff) === 0 ? 1 : 0,
+    });
+  }
+
+  SBC() {
+    const r1 = this.readRegister(this._current_instruction.r1!);
+    const i = this._fetched_data;
+    const c = this.getCFlag();
+    const val = r1 - i - c;
+    this.writeRegister(this._current_instruction.r1!, val & 0xff);
+    this.setFlags({
+      c: val < 0 ? 1 : 0,
+      h: (r1 & 0xf) - (i & 0xf) - c < 0 ? 1 : 0,
+      n: 1,
+      z: (val & 0xff) === 0 ? 1 : 0,
+    });
+  }
+
+  AND() {
+    const val = this.readRegister(this._current_instruction.r1!) & this._fetched_data;
+    this.writeRegister(this._current_instruction.r1!, val);
+    this.setFlags({
+      c: 0,
+      h: 1,
+      n: 0,
+      z: val === 0 ? 1 : 0,
+    });
+  }
+
+  OR() {
+    const val = this.readRegister(this._current_instruction.r1!) | this._fetched_data;
+    this.writeRegister(this._current_instruction.r1!, val);
+    this.setFlags({
+      c: 0,
+      h: 0,
+      n: 0,
+      z: val === 0 ? 1 : 0,
+    });
+  }
+
+  XOR() {
+    const val = this.readRegister(this._current_instruction.r1!) ^ this._fetched_data;
+    this.writeRegister(this._current_instruction.r1!, val);
+    this.setFlags({
+      c: 0,
+      h: 0,
+      n: 0,
+      z: val === 0 ? 1 : 0,
+    });
+  }
+
+  CP() {
+    const r1 = this.readRegister(this._current_instruction.r1!);
+    const i = this._fetched_data;
+    const val = r1 - i;
+    this.setFlags({
+      c: val < 0 ? 1 : 0,
+      h: (r1 & 0x0f) + (i & 0x0f) < 0 ? 1 : 0,
+      n: 1,
+      z: val === 0 ? 1 : 0,
+    });
+  }
+
+  CB() {
+    const registers = [
+      REGISTER.B,
+      REGISTER.C,
+      REGISTER.D,
+      REGISTER.E,
+      REGISTER.H,
+      REGISTER.L,
+      REGISTER.HL,
+      REGISTER.A,
+    ];
+    const opcode = this._fetched_data;
+    const reg = registers[opcode & 0x07];
+    const bit = (opcode >> 3) & 0x07;
+    const op = (opcode >> 6) & 0x03;
+
+    let val = this.readRegister(reg);
+
+    this.cycleCPU(1);
+
+    if (reg === REGISTER.HL) {
+      this.cycleCPU(2);
+      val = this._mmu.read(val);
+    }
+
+    switch (op) {
+      case 1:
+        //BIT
+        this.setFlags({
+          h: 1,
+          n: 0,
+          z: !(val & (1 << bit)) ? 1 : 0,
+        });
+        return;
+      case 2:
+        //RES
+        this.writeRegister(reg, setBit({ n: val, bit, val: 0 }));
+        return;
+      case 3:
+        //SET
+        this.writeRegister(reg, setBit({ n: val, bit, val: 1 }));
+        return;
+    }
+
+    switch (bit) {
+      case 0: {
+        //RLC
+        let c: Bit = 0;
+        let result = (val << 1) & 0xff;
+        if (!!getBit({ n: val, bit: 7 })) {
+          result |= 1;
+          c = 1;
+        }
+        this.writeRegister(reg, result);
+        this.setFlags({ c, h: 0, n: 0, z: result === 0 ? 1 : 0 });
+        return;
+      }
+      case 1: {
+        //RRC
+        let result = val >> 1;
+        result |= val << 7;
+        this.writeRegister(reg, result);
+        this.setFlags({ c: val & 1 ? 1 : 0, h: 0, n: 0, z: result === 0 ? 1 : 0 });
+        return;
+      }
+      case 2: {
+        //RL
+        let result = val << 1;
+        result |= this.getCFlag();
+        this.writeRegister(reg, result);
+        this.setFlags({ c: !!(val & 0x80) ? 1 : 0, h: 0, n: 0, z: result === 0 ? 1 : 0 });
+        return;
+      }
+      case 3: {
+        //RR
+        let result = val >> 1;
+        result |= this.getCFlag() << 7;
+        this.writeRegister(reg, result);
+        this.setFlags({ c: val & 1 ? 1 : 0, h: 0, n: 0, z: result === 0 ? 1 : 0 });
+        return;
+      }
+      case 4: {
+        //SLA
+        let result = val << 1;
+        this.writeRegister(reg, result);
+        this.setFlags({ c: !!(val & 0x80) ? 1 : 0, h: 0, n: 0, z: result === 0 ? 1 : 0 });
+        return;
+      }
+      case 5: {
+        //SRA
+        let result = val >> 1;
+        this.writeRegister(reg, result);
+        this.setFlags({ c: 0, h: 0, n: 0, z: result === 0 ? 1 : 0 });
+        return;
+      }
+      case 6: {
+        //SWAP
+        let result = ((val & 0xf0) >> 4) | ((val & 0xf) << 4);
+        this.writeRegister(reg, result);
+        this.setFlags({ c: 0, h: 0, n: 0, z: result === 0 ? 1 : 0 });
+        return;
+      }
+      case 7: {
+        //SRL
+        let result = val >> 1;
+        this.writeRegister(reg, result);
+        this.setFlags({ c: val & 1 ? 1 : 0, h: 0, n: 0, z: result === 0 ? 1 : 0 });
+        return;
+      }
+      default:
+        //No Implementation
+        return;
+    }
+  }
+
+  RLCA() {
+    const c = (this._r.a >> 7) & 1;
+    const result = (this._r.a << 1) | c;
+    this.writeRegister(this._r.a, result);
+    this.setFlags({ c: c ? 1 : 0, h: 0, n: 0, z: 0 });
+  }
+
+  RRCA() {
+    const c = this._r.a & 1;
+    let result = this._r.a >> 1;
+    result |= c << 7;
+    this.writeRegister(this._r.a, result);
+    this.setFlags({ c: c ? 1 : 0, h: 0, n: 0, z: 0 });
+  }
+
+  RLA() {
+    const c = (this._r.a >> 7) & 1;
+    const result = (this._r.a << 1) | this.getCFlag();
+    this.writeRegister(this._r.a, result);
+    this.setFlags({ c: c ? 1 : 0, h: 0, n: 0, z: 0 });
+  }
+
+  RRA() {
+    const c = this._r.a & 1;
+    let result = this._r.a >> 1;
+    result |= this.getCFlag() << 7;
+    this.writeRegister(this._r.a, result);
+    this.setFlags({ c: c ? 1 : 0, h: 0, n: 0, z: 0 });
+  }
+
+  DAA() {
+    let result = 0;
+    let c: Bit = 0;
+    if (this.getHFlag() || (!this.getNFlag && (this._r.a & 0xf) > 0x09)) {
+      result = 0x06;
+    }
+    if (this.getCFlag() || (!this.getNFlag && this._r.a > 0x99)) {
+      result |= 0x60;
+      c = 1;
+    }
+    result = this._r.a + (this.getNFlag() ? -result : result);
+    this.writeRegister(REGISTER.A, result);
+    this.setFlags({ c, h: 0, z: result === 0 ? 1 : 0 });
+  }
+
+  CPL() {
+    this.writeRegister(REGISTER.A, ~this._r.a);
+    this.setFlags({ h: 1, n: 1 });
+  }
+
+  SCF() {
+    this.setFlags({ c: 1, h: 0, n: 0 });
+  }
+
+  CCF() {
+    this.setFlags({ c: this.getCFlag() ^ 1 ? 1 : 0, h: 0, n: 0 });
+  }
+
+  EI() {
+    this._enabling_interrupt_me = true;
+  }
+
+  DI() {
+    this._interrupt_me = false;
+  }
+
+  HALT() {
+    this._halted = true;
+  }
+
+  STOP() {}
 }
