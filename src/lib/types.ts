@@ -122,3 +122,20 @@ export enum INTERRUPT_TYPE {
 
 //General
 export type Bit = 0 | 1;
+
+export interface Context {
+  a: string;
+  f: string;
+  b: string;
+  c: string;
+  d: string;
+  e: string;
+  h: string;
+  l: string;
+  af: string;
+  bc: string;
+  de: string;
+  hl: string;
+  sp: string;
+  flags: { c: number; h: number; n: number; z: number };
+}

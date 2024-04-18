@@ -1,19 +1,20 @@
-import { InstructionName, Instructions } from "../lib/constants";
+import { Instructions } from "../lib/constants";
 import {
   ADDRESSING_MODE,
   Bit,
   CONDITION_TYPE,
+  Context,
   Instruction,
   INSTRUCTION_TYPE,
   INTERRUPT_TYPE,
   REGISTER,
 } from "../lib/types";
-import { getBit, setBit } from "../lib/utils";
+import { getBit, instructionToString, setBit } from "../lib/utils";
 import { MMU } from "./mmu";
+import { Timer } from "./timer";
 
 export class CPU {
   _r;
-  _m;
 
   _fetched_data;
   _is_memory_destination;
@@ -23,11 +24,11 @@ export class CPU {
   _interrupt_me;
   _enabling_interrupt_me;
   _halted;
-  _stepping;
 
   _mmu;
+  _timer;
 
-  constructor(mmu: MMU) {
+  constructor(mmu: MMU, timer: Timer) {
     this._r = {
       a: 0,
       f: 0,
@@ -42,7 +43,6 @@ export class CPU {
       ie: 0,
       i: 0,
     };
-    this._m = 0;
     this._fetched_data = 0;
     this._is_memory_destination = false;
     this._memory_destination = 0;
@@ -51,12 +51,38 @@ export class CPU {
     this._interrupt_me = false;
     this._enabling_interrupt_me = false;
     this._halted = false;
-    this._stepping = false;
     this._mmu = mmu;
+    this._timer = timer;
   }
 
-  cycleCPU(val: number) {
-    this._m += val;
+  init() {
+    this._r.pc = 0x100;
+    this._r.sp = 0xfffe;
+    this.writeRegister(REGISTER.AF, 0x01b0);
+    this.writeRegister(REGISTER.BC, 0x0013);
+    this.writeRegister(REGISTER.DE, 0x00d8);
+    this.writeRegister(REGISTER.HL, 0x014d);
+    this._timer._r.div = 0xabcc;
+  }
+
+  reset() {
+    this._r.pc = 0x100;
+    this._r.sp = 0xfffe;
+    this.writeRegister(REGISTER.AF, 0x01b0);
+    this.writeRegister(REGISTER.BC, 0x0013);
+    this.writeRegister(REGISTER.DE, 0x00d8);
+    this.writeRegister(REGISTER.HL, 0x014d);
+    this._r.ie = 0;
+    this._r.i = 0;
+    this._fetched_data = 0;
+    this._is_memory_destination = false;
+    this._memory_destination = 0;
+    this._current_opcode = 0;
+    this._current_instruction = {} as Instruction;
+    this._interrupt_me = false;
+    this._enabling_interrupt_me = false;
+    this._halted = false;
+    this._timer._r.div = 0xabcc;
   }
 
   stackPush(val: number) {
@@ -70,8 +96,9 @@ export class CPU {
   }
 
   stackPop() {
+    const val = this._mmu.read(this._r.sp);
     this._r.sp += 1;
-    return this._mmu.read(this._r.sp);
+    return val;
   }
 
   stackPop16() {
@@ -276,13 +303,14 @@ export class CPU {
   }
 
   setFlags({ c, h, n, z }: { c?: Bit; h?: Bit; n?: Bit; z?: Bit }) {
-    if (!!c) setBit({ n: this._r.f, bit: 4, val: c });
+    // console.log("SET FLAGS:", c, h, n, z);
+    if (c !== undefined) this._r.f = setBit({ n: this._r.f, bit: 4, val: c });
 
-    if (!!h) setBit({ n: this._r.f, bit: 5, val: h });
+    if (h !== undefined) this._r.f = setBit({ n: this._r.f, bit: 5, val: h });
 
-    if (!!n) setBit({ n: this._r.f, bit: 6, val: n });
+    if (n !== undefined) this._r.f = setBit({ n: this._r.f, bit: 6, val: n });
 
-    if (!!z) setBit({ n: this._r.f, bit: 7, val: z });
+    if (z !== undefined) this._r.f = setBit({ n: this._r.f, bit: 7, val: z });
   }
 
   checkRegister(id: number) {
@@ -318,13 +346,13 @@ export class CPU {
       case CONDITION_TYPE.NONE:
         return true;
       case CONDITION_TYPE.C:
-        return !!c;
+        return c === 1;
       case CONDITION_TYPE.Z:
-        return !!z;
+        return z === 1;
       case CONDITION_TYPE.NC:
-        return !c;
+        return c === 0;
       case CONDITION_TYPE.NZ:
-        return !z;
+        return z === 0;
       default:
         return false;
     }
@@ -350,31 +378,33 @@ export class CPU {
         return;
 
       case ADDRESSING_MODE.HL_SPR:
+      case ADDRESSING_MODE.R_A8:
       case ADDRESSING_MODE.R_D8:
       case ADDRESSING_MODE.D8:
         this._fetched_data = this._mmu.read(this._r.pc);
-        this.cycleCPU(1);
+        this._timer.cycle(1);
         this._r.pc += 1;
         return;
 
       case ADDRESSING_MODE.R_D16:
       case ADDRESSING_MODE.D16: {
         const low = this._mmu.read(this._r.pc);
-        this.cycleCPU(1);
+        this._timer.cycle(1);
         const high = this._mmu.read(this._r.pc + 1);
-        this.cycleCPU(1);
+        this._timer.cycle(1);
         this._fetched_data = (high << 8) | low;
         this._r.pc += 2;
         return;
       }
 
+      case ADDRESSING_MODE.A16_R:
       case ADDRESSING_MODE.D16_R: {
         this.checkRegister(2);
         this._fetched_data = this.readRegister(this._current_instruction.r2!);
         const low = this._mmu.read(this._r.pc);
-        this.cycleCPU(1);
+        this._timer.cycle(1);
         const high = this._mmu.read(this._r.pc + 1);
-        this.cycleCPU(1);
+        this._timer.cycle(1);
         this._memory_destination = (high << 8) | low;
         this._is_memory_destination = true;
         this._r.pc += 2;
@@ -384,15 +414,21 @@ export class CPU {
       case ADDRESSING_MODE.R_HLI:
         this.checkRegister(2);
         this._fetched_data = this._mmu.read(this.readRegister(this._current_instruction.r2!));
-        this.cycleCPU(1);
-        this.writeRegister(this._current_instruction.r2!, this._fetched_data + 1);
+        this._timer.cycle(1);
+        this.writeRegister(
+          this._current_instruction.r2!,
+          this.readRegister(this._current_instruction.r2!) + 1
+        );
         return;
 
       case ADDRESSING_MODE.R_HLD:
         this.checkRegister(2);
         this._fetched_data = this._mmu.read(this.readRegister(this._current_instruction.r2!));
-        this.cycleCPU(1);
-        this.writeRegister(this._current_instruction.r2!, this._fetched_data - 1);
+        this._timer.cycle(1);
+        this.writeRegister(
+          this._current_instruction.r2!,
+          this.readRegister(this._current_instruction.r2!) - 1
+        );
         return;
 
       case ADDRESSING_MODE.HLI_R:
@@ -400,7 +436,10 @@ export class CPU {
         this._fetched_data = this.readRegister(this._current_instruction.r2!);
         this._memory_destination = this._mmu.read(this.readRegister(this._current_instruction.r1!));
         this._is_memory_destination = true;
-        this.writeRegister(this._current_instruction.r1!, this._fetched_data + 1);
+        this.writeRegister(
+          this._current_instruction.r1!,
+          this.readRegister(this._current_instruction.r1!) + 1
+        );
         return;
 
       case ADDRESSING_MODE.HLD_R:
@@ -408,7 +447,10 @@ export class CPU {
         this._fetched_data = this.readRegister(this._current_instruction.r2!);
         this._memory_destination = this._mmu.read(this.readRegister(this._current_instruction.r1!));
         this._is_memory_destination = true;
-        this.writeRegister(this._current_instruction.r1!, this._fetched_data - 1);
+        this.writeRegister(
+          this._current_instruction.r1!,
+          this.readRegister(this._current_instruction.r1!) - 1
+        );
         return;
 
       case ADDRESSING_MODE.R_R:
@@ -416,48 +458,25 @@ export class CPU {
         this._fetched_data = this.readRegister(this._current_instruction.r2!);
         return;
 
-      case ADDRESSING_MODE.R_A8: {
-        const address = this._mmu.read(this._r.pc) & 0xff;
-        this._fetched_data = this._mmu.read(address);
-        this._r.pc += 1;
-        this.cycleCPU(1);
-        return;
-      }
-
       case ADDRESSING_MODE.R_A16: {
         const low = this._mmu.read(this._r.pc);
-        this.cycleCPU(1);
+        this._timer.cycle(1);
         const high = this._mmu.read(this._r.pc + 1);
-        this.cycleCPU(1);
+        this._timer.cycle(1);
         const address = (high << 8) | low;
         this._fetched_data = this._mmu.read(address);
         this._r.pc += 2;
-        this.cycleCPU(1);
-        return;
-      }
-
-      case ADDRESSING_MODE.A16_R: {
-        this.checkRegister(2);
-        this._fetched_data = this.readRegister(this._current_instruction.r2!);
-        const low = this._mmu.read(this._r.pc);
-        this.cycleCPU(1);
-        const high = this._mmu.read(this._r.pc + 1);
-        this.cycleCPU(1);
-        const address = (high << 8) | low;
-        this._memory_destination = this._mmu.read(address);
-        this._is_memory_destination = true;
-        this._r.pc += 2;
+        this._timer.cycle(1);
         return;
       }
 
       case ADDRESSING_MODE.A8_R: {
         this.checkRegister(2);
         this._fetched_data = this.readRegister(this._current_instruction.r2!);
-        const address = this._mmu.read(this._r.pc) & 0xff;
-        this._memory_destination = this._mmu.read(address);
+        this._memory_destination = this._mmu.read(this._r.pc) | 0xff00;
         this._is_memory_destination = true;
         this._r.pc += 1;
-        this.cycleCPU(1);
+        this._timer.cycle(1);
         return;
       }
 
@@ -465,14 +484,14 @@ export class CPU {
         this.checkRegister(1);
         this._memory_destination = this.readRegister(this._current_instruction.r1!);
         this._is_memory_destination = true;
-        this.cycleCPU(1);
+        this._timer.cycle(1);
         return;
 
       case ADDRESSING_MODE.MR_R:
         this.checkRegister(3);
         this._fetched_data = this.readRegister(this._current_instruction.r2!);
-        this._memory_destination = this._mmu.read(this.readRegister(this._current_instruction.r1!));
-        if (this._current_instruction.r2 === REGISTER.C) {
+        this._memory_destination = this.readRegister(this._current_instruction.r1!);
+        if (this._current_instruction.r1 === REGISTER.C) {
           this._memory_destination |= 0xff00;
         }
         this._is_memory_destination = true;
@@ -481,20 +500,20 @@ export class CPU {
       case ADDRESSING_MODE.MR_D8:
         this.checkRegister(1);
         this._fetched_data = this._mmu.read(this._r.pc);
-        this.cycleCPU(1);
+        this._timer.cycle(1);
         this._r.pc += 1;
-        this._memory_destination = this._mmu.read(this.readRegister(this._current_instruction.r1!));
+        this._memory_destination = this.readRegister(this._current_instruction.r1!);
         this._is_memory_destination = true;
         return;
 
       case ADDRESSING_MODE.R_MR: {
         this.checkRegister(2);
         let address = this.readRegister(this._current_instruction.r2!);
-        if (this._current_instruction.r1 === REGISTER.C) {
+        if (this._current_instruction.r2 === REGISTER.C) {
           address |= 0xff00;
         }
         this._fetched_data = this._mmu.read(address);
-        this.cycleCPU(1);
+        this._timer.cycle(1);
         return;
       }
 
@@ -508,50 +527,61 @@ export class CPU {
     op();
   }
 
-  init() {
-    this._r.pc = 0x100;
-  }
-
-  step(): boolean {
+  step() {
     if (!this._halted) {
-      const pc = this._r.pc;
-
-      this.fetchInstruction();
-      this.cycleCPU(1);
-
-      // const status = document.querySelector(".status") as HTMLDivElement;
-      // const line = document.createElement("p");
-      // line.innerText = `PC: ${pc.toString(16)} INSTRUCTION: ${
-      //   InstructionName[this._current_instruction.type]
-      // } CURRENT OPCODE: ${this._current_opcode.toString(16)} (${this._mmu
-      //   .read(pc + 1)
-      //   .toString(16)}, ${this._mmu.read(pc + 2).toString(16)})`;
-      // status.appendChild(line);
-      console.log(
-        "PC:",
-        pc.toString(16),
-        "INSTRUCTION:",
-        InstructionName[this._current_instruction.type],
-        "CURRENT OPCODE:",
-        this._current_opcode.toString(16),
-        "(",
-        this._mmu.read(pc + 1).toString(16),
-        ",",
-        this._mmu.read(pc + 2).toString(16),
-        ")"
-      );
-
-      this.fetchData();
-      this.execute();
+      try {
+        const pc = this._r.pc;
+        this.fetchInstruction();
+        this._timer.cycle(1);
+        this.fetchData();
+        // const status = `PC: ${pc.toString(16)}, OPCODE: ${this._current_opcode.toString(
+        //   16
+        // )}, ${instructionToString(this._current_instruction, this._fetched_data)}`;
+        // postMessage({
+        //   status,
+        //   context: {
+        //     a: this._r.a.toString(16),
+        //     f: this._r.f.toString(16),
+        //     b: this._r.b.toString(16),
+        //     c: this._r.c.toString(16),
+        //     d: this._r.d.toString(16),
+        //     e: this._r.e.toString(16),
+        //     h: this._r.h.toString(16),
+        //     l: this._r.l.toString(16),
+        //     af: this.readRegister(REGISTER.AF).toString(16),
+        //     bc: this.readRegister(REGISTER.BC).toString(16),
+        //     de: this.readRegister(REGISTER.DE).toString(16),
+        //     hl: this.readRegister(REGISTER.HL).toString(16),
+        //     sp: this._r.sp.toString(16),
+        //     flags: {
+        //       c: this.getCFlag(),
+        //       h: this.getHFlag(),
+        //       n: this.getNFlag(),
+        //       z: this.getZFlag(),
+        //     },
+        //   } as Context,
+        // });
+        // this._mmu.debugUpdate();
+        // this._mmu.debugPrint();
+        this.execute();
+      } catch (error) {
+        console.log(error);
+        return false;
+      }
     } else {
-      this.cycleCPU(1);
+      this._timer.cycle(1);
       if (this._r.i) {
         this._halted = false;
       }
     }
 
     if (this._interrupt_me) {
-      this.handleInterrupt();
+      try {
+        this.handleInterrupt();
+      } catch (error) {
+        console.log(error);
+        return false;
+      }
       this._enabling_interrupt_me = false;
     }
 
@@ -598,31 +628,25 @@ export class CPU {
   LD() {
     if (this._is_memory_destination) {
       if (this._current_instruction.r2! >= REGISTER.AF) {
-        this.cycleCPU(1);
+        this._timer.cycle(1);
         this._mmu.write16(this._memory_destination, this._fetched_data);
       } else {
         this._mmu.write(this._memory_destination, this._fetched_data);
       }
-      this.cycleCPU(1);
+      this._timer.cycle(1);
       return;
     }
 
     if (this._current_instruction.mode === ADDRESSING_MODE.HL_SPR) {
-      const shouldSetHFlag =
+      const h =
         (this.readRegister(this._current_instruction.r2!) & 0xf) + (this._fetched_data & 0xf) >=
         0x10;
 
-      const shouldSetCFlag =
+      const c =
         (this.readRegister(this._current_instruction.r2!) & 0xff) + (this._fetched_data & 0xff) >=
         0x100;
 
-      if (shouldSetHFlag) {
-        setBit({ n: this._r.f, bit: 5, val: 1 });
-      }
-
-      if (shouldSetCFlag) {
-        setBit({ n: this._r.f, bit: 4, val: 1 });
-      }
+      this.setFlags({ c: c ? 1 : 0, h: h ? 1 : 0, n: 0, z: 0 });
 
       this.writeRegister(
         this._current_instruction.r1!,
@@ -639,26 +663,26 @@ export class CPU {
     if (this._current_instruction.r1 == REGISTER.A) {
       this.writeRegister(this._current_instruction.r1, this._mmu.read(0xff00 | this._fetched_data));
     } else {
-      this._mmu.write(0xff00 | this._fetched_data, this._r.a);
+      this._mmu.write(this._memory_destination, this._r.a);
     }
-    this.cycleCPU(1);
+    this._timer.cycle(1);
   }
 
   PUSH() {
     const high = (this.readRegister(this._current_instruction.r1!) >> 8) & 0xff;
-    this.cycleCPU(1);
+    this._timer.cycle(1);
     this.stackPush(high);
     const low = this.readRegister(this._current_instruction.r1!) & 0xff;
-    this.cycleCPU(1);
+    this._timer.cycle(1);
     this.stackPush(low);
-    this.cycleCPU(1);
+    this._timer.cycle(1);
   }
 
   POP() {
     const low = this.stackPop();
-    this.cycleCPU(1);
+    this._timer.cycle(1);
     const high = this.stackPop();
-    this.cycleCPU(1);
+    this._timer.cycle(1);
     const val = (high << 8) | low;
     if (this._current_instruction.r1 === REGISTER.AF) {
       this.writeRegister(this._current_instruction.r1, val & 0xfff0);
@@ -670,40 +694,41 @@ export class CPU {
   JP() {
     if (this.checkCondition()) {
       this._r.pc = this._fetched_data;
-      this.cycleCPU(1);
+      this._timer.cycle(1);
     }
   }
 
   JR() {
     if (this.checkCondition()) {
-      const rel = this._fetched_data & 0xff;
-      this._r.pc = this._fetched_data + rel;
-      this.cycleCPU(1);
+      let rel = this._fetched_data & 0xff;
+      rel -= (rel & 0x80) << 1;
+      this._r.pc += rel;
+      this._timer.cycle(1);
     }
   }
 
   CALL() {
     if (this.checkCondition()) {
       this.stackPush16(this._r.pc);
-      this.cycleCPU(2);
+      this._timer.cycle(2);
       this._r.pc = this._fetched_data;
-      this.cycleCPU(1);
+      this._timer.cycle(1);
     }
   }
 
   RET() {
     if (this._current_instruction.condition !== CONDITION_TYPE.NONE) {
-      this.cycleCPU(1);
+      this._timer.cycle(1);
     }
 
     if (this.checkCondition()) {
       const low = this.stackPop();
-      this.cycleCPU(1);
+      this._timer.cycle(1);
       const high = this.stackPop();
-      this.cycleCPU(1);
+      this._timer.cycle(1);
       const val = (high << 8) | low;
       this._r.pc = val;
-      this.cycleCPU(1);
+      this._timer.cycle(1);
     }
   }
 
@@ -719,15 +744,15 @@ export class CPU {
     if (this.checkCondition()) {
       this._r.pc = this._current_instruction.param;
       this.stackPush16(this._r.pc);
-      this.cycleCPU(3);
+      this._timer.cycle(3);
     }
   }
 
   INC() {
-    let val;
+    let val = this.readRegister(this._current_instruction.r1!) + 1;
 
     if (this._current_instruction.r1! >= REGISTER.AF) {
-      this.cycleCPU(1);
+      this._timer.cycle(1);
     }
 
     if (
@@ -738,8 +763,8 @@ export class CPU {
       val &= 0xff;
       this._mmu.write(this.readRegister(REGISTER.HL), val);
     } else {
-      val = this.readRegister(this._current_instruction.r1!) + 1;
       this.writeRegister(this._current_instruction.r1!, val);
+      val = this.readRegister(this._current_instruction.r1!);
     }
 
     if ((this._current_opcode & 0x03) === 0x03) return;
@@ -748,10 +773,10 @@ export class CPU {
   }
 
   DEC() {
-    let val;
+    let val = this.readRegister(this._current_instruction.r1!) - 1;
 
     if (this._current_instruction.r1! >= REGISTER.AF) {
-      this.cycleCPU(1);
+      this._timer.cycle(1);
     }
 
     if (
@@ -759,11 +784,10 @@ export class CPU {
       this._current_instruction.mode === ADDRESSING_MODE.MR
     ) {
       val = this._mmu.read(this.readRegister(REGISTER.HL)) - 1;
-      val &= 0xff;
       this._mmu.write(this.readRegister(REGISTER.HL), val);
     } else {
-      val = this.readRegister(this._current_instruction.r1!) - 1;
       this.writeRegister(this._current_instruction.r1!, val);
+      val = this.readRegister(this._current_instruction.r1!);
     }
 
     if ((this._current_opcode & 0x0b) === 0x0b) return;
@@ -783,10 +807,10 @@ export class CPU {
     const is16bit = this._current_instruction.r2! >= REGISTER.AF;
 
     if (this._current_instruction.r2 === REGISTER.SP) {
-      this.cycleCPU(1);
+      this._timer.cycle(1);
       z = false;
     } else if (is16bit) {
-      this.cycleCPU(1);
+      this._timer.cycle(1);
       z = null;
       h = (r1 & 0xfff) + (i & 0xfff) >= 0x1000;
 
@@ -850,7 +874,7 @@ export class CPU {
   }
 
   OR() {
-    const val = this.readRegister(this._current_instruction.r1!) | this._fetched_data;
+    const val = this.readRegister(this._current_instruction.r1!) | (this._fetched_data & 0xff);
     this.writeRegister(this._current_instruction.r1!, val);
     this.setFlags({
       c: 0,
@@ -861,7 +885,7 @@ export class CPU {
   }
 
   XOR() {
-    const val = this.readRegister(this._current_instruction.r1!) ^ this._fetched_data;
+    const val = this.readRegister(this._current_instruction.r1!) ^ (this._fetched_data & 0xff);
     this.writeRegister(this._current_instruction.r1!, val);
     this.setFlags({
       c: 0,
@@ -877,7 +901,7 @@ export class CPU {
     const val = r1 - i;
     this.setFlags({
       c: val < 0 ? 1 : 0,
-      h: (r1 & 0x0f) + (i & 0x0f) < 0 ? 1 : 0,
+      h: (r1 & 0x0f) - (i & 0x0f) < 0 ? 1 : 0,
       n: 1,
       z: val === 0 ? 1 : 0,
     });
@@ -901,10 +925,10 @@ export class CPU {
 
     let val = this.readRegister(reg);
 
-    this.cycleCPU(1);
+    this._timer.cycle(1);
 
     if (reg === REGISTER.HL) {
-      this.cycleCPU(2);
+      this._timer.cycle(2);
       val = this._mmu.read(val);
     }
 

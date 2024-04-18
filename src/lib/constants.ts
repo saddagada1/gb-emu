@@ -19,12 +19,14 @@ export const Bios = [
   0xf5, 0x06, 0x19, 0x78, 0x86, 0x23, 0x05, 0x20, 0xfb, 0x86, 0x20, 0xfe, 0x3e, 0x01, 0xe0, 0x50,
 ];
 
-export const Pallette = [
-  [255, 255, 255, 255],
-  [192, 192, 192, 255],
-  [96, 96, 96, 255],
-  [0, 0, 0, 255],
-];
+export const Pallette = ["#B5C18E", "#F7DCB9", "#DEAC80", "#B99470"];
+
+export const WIDTH = 160;
+export const HEIGHT = 144;
+export const SCALE = 1;
+
+export const debugScreenWidth = 16 * 8 * SCALE;
+export const debugScreenHeight = 32 * 8 * SCALE;
 
 //Cartridge
 export const CartridgeType: Record<number, string> = {
@@ -175,6 +177,25 @@ export const InstructionName: Record<INSTRUCTION_TYPE, string> = {
   47: "SET",
 };
 
+export const RegisterName: Record<REGISTER, string> = {
+  0: "A",
+  1: "F",
+  2: "B",
+  3: "C",
+  4: "D",
+  5: "E",
+  6: "H",
+  7: "L",
+  8: "AF",
+  9: "BC",
+  10: "DE",
+  11: "HL",
+  12: "SP",
+  13: "PC",
+  14: "IE",
+  15: "I",
+};
+
 export const Instructions: Record<number, Instruction> = {
   //0x0X
   0x00: {
@@ -295,6 +316,7 @@ export const Instructions: Record<number, Instruction> = {
   },
   0x18: {
     type: INSTRUCTION_TYPE.JR,
+    mode: ADDRESSING_MODE.D8,
     condition: CONDITION_TYPE.NONE,
   },
   0x19: {
@@ -336,6 +358,7 @@ export const Instructions: Record<number, Instruction> = {
   //0x2X
   0x20: {
     type: INSTRUCTION_TYPE.JR,
+    mode: ADDRESSING_MODE.D8,
     condition: CONDITION_TYPE.NZ,
   },
   0x21: {
@@ -374,6 +397,7 @@ export const Instructions: Record<number, Instruction> = {
   },
   0x28: {
     type: INSTRUCTION_TYPE.JR,
+    mode: ADDRESSING_MODE.D8,
     condition: CONDITION_TYPE.Z,
   },
   0x29: {
@@ -415,6 +439,7 @@ export const Instructions: Record<number, Instruction> = {
   //0x3X
   0x30: {
     type: INSTRUCTION_TYPE.JR,
+    mode: ADDRESSING_MODE.D8,
     condition: CONDITION_TYPE.NC,
   },
   0x31: {
@@ -453,6 +478,7 @@ export const Instructions: Record<number, Instruction> = {
   },
   0x38: {
     type: INSTRUCTION_TYPE.JR,
+    mode: ADDRESSING_MODE.D8,
     condition: CONDITION_TYPE.C,
   },
   0x39: {
@@ -1563,6 +1589,3 @@ export const Instructions: Record<number, Instruction> = {
     param: 0x38,
   },
 };
-
-export const WIDTH = 160;
-export const HEIGHT = 144;

@@ -5,7 +5,24 @@
 }
 
 .screen {
-  border: 2px solid black;
-  width: 160px;
-  height: 144px;
+  width: 100vw;
+  height: 50vh;
 }
+
+/* .status-container,
+.context-container {
+  width: 100vw;
+  height: 40vh;
+  background-color: #000;
+  overflow-y: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+.status {
+  font-family: monospace;
+  font-weight: 500;
+  white-space: nowrap;
+  color: limegreen;
+} */
