@@ -19,14 +19,14 @@ export const Bios = [
   0xf5, 0x06, 0x19, 0x78, 0x86, 0x23, 0x05, 0x20, 0xfb, 0x86, 0x20, 0xfe, 0x3e, 0x01, 0xe0, 0x50,
 ];
 
-export const Pallette = ["#B5C18E", "#F7DCB9", "#DEAC80", "#B99470"];
+export const Pallette = [0xffffff, 0xaaaaaa, 0x555555, 0x000000];
 
-export const WIDTH = 160;
-export const HEIGHT = 144;
-export const SCALE = 1;
-
-export const debugScreenWidth = 16 * 8 * SCALE;
-export const debugScreenHeight = 32 * 8 * SCALE;
+export const LINES_PER_FRAME = 154;
+export const TICKS_PER_LINE = 456;
+export const XRES = 160;
+export const YRES = 144;
+export const FRAME_RATE = 1000 / 60;
+export const SCALE = 4;
 
 //Cartridge
 export const CartridgeType: Record<number, string> = {

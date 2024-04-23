@@ -92,6 +92,19 @@ export class MMU {
         return this._timer.read(addr);
       case 0xff0f:
         return this.cpuRead(REGISTER.I);
+      case 0xff40:
+      case 0xff41:
+      case 0xff42:
+      case 0xff43:
+      case 0xff44:
+      case 0xff45:
+      case 0xff46:
+      case 0xff47:
+      case 0xff48:
+      case 0xff49:
+      case 0xff4a:
+      case 0xff4b:
+        return this.ppuRead("lcd", addr);
       default:
         return 0;
     }
@@ -113,6 +126,20 @@ export class MMU {
         return;
       case 0xff0f:
         this.cpuWrite(REGISTER.I, val);
+        return;
+      case 0xff40:
+      case 0xff41:
+      case 0xff42:
+      case 0xff43:
+      case 0xff44:
+      case 0xff45:
+      case 0xff46:
+      case 0xff47:
+      case 0xff48:
+      case 0xff49:
+      case 0xff4a:
+      case 0xff4b:
+        this.ppuWrite("lcd", addr, val);
         return;
     }
   }
@@ -147,32 +174,43 @@ export class MMU {
     }
   }
 
-  ppuRead(ram: "vram" | "oam", addr: number) {
+  ppuRead(ram: "vram" | "oam" | "lcd", addr: number) {
     if (!this._ppu) {
       throw new Error("PPU Error: MMU is not connected to the PPU.");
     }
 
     switch (ram) {
       case "oam":
+        if (this._ppu._dma.active) {
+          return 0xff;
+        }
         return this._ppu.oamRead(addr);
       case "vram":
         return this._ppu.vramRead(addr);
+      case "lcd":
+        return this._ppu.lcdRead(addr);
       default:
         return 0;
     }
   }
 
-  ppuWrite(ram: "vram" | "oam", addr: number, val: number) {
+  ppuWrite(ram: "vram" | "oam" | "lcd", addr: number, val: number) {
     if (!this._ppu) {
       throw new Error("PPU Error: MMU is not connected to the PPU.");
     }
 
     switch (ram) {
       case "oam":
+        if (this._ppu._dma.active) {
+          return;
+        }
         this._ppu.oamWrite(addr, val);
         return;
       case "vram":
         this._ppu.vramWrite(addr, val);
+        return;
+      case "lcd":
+        this._ppu.lcdWrite(addr, val);
         return;
     }
   }
@@ -187,8 +225,8 @@ export class MMU {
   }
 
   debugPrint() {
-    const decoder = new TextDecoder("utf-8");
-    console.log("DBG:", decoder.decode(this._debug));
+    const decoder = new TextDecoder();
+    return "DBG: " + decoder.decode(this._debug);
   }
 
   read(addr: number): number {
@@ -197,7 +235,7 @@ export class MMU {
       return this._cartridge.read(addr);
     } else if (addr < 0xa000) {
       //Map Data
-      return this.ppuRead("vram", addr);
+      return this.ppuRead("vram", addr - 0x8000);
     } else if (addr < 0xc000) {
       //Cartridge RAM
       return this._cartridge.read(addr);
@@ -231,7 +269,7 @@ export class MMU {
       this._cartridge.write(addr, val);
     } else if (addr < 0xa000) {
       //Map Data
-      this.ppuWrite("vram", addr, val);
+      this.ppuWrite("vram", addr - 0x8000, val);
     } else if (addr < 0xc000) {
       //Cartridge RAM
       this._cartridge.write(addr, val);

@@ -6,23 +6,5 @@
 
 .screen {
   width: 100vw;
-  height: 50vh;
+  height: 95vh;
 }
-
-/* .status-container,
-.context-container {
-  width: 100vw;
-  height: 40vh;
-  background-color: #000;
-  overflow-y: hidden;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-}
-
-.status {
-  font-family: monospace;
-  font-weight: 500;
-  white-space: nowrap;
-  color: limegreen;
-} */

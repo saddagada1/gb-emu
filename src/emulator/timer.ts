@@ -1,11 +1,20 @@
-import { INTERRUPT_TYPE, REGISTER } from "../lib/types";
+import { FRAME_RATE } from "../lib/constants";
+import { INTERRUPT_TYPE } from "../lib/types";
+import { sleep } from "../lib/utils";
 import { CPU } from "./cpu";
+import { PPU } from "./ppu";
 
 export class Timer {
   _r;
   _ticks;
+  _start_time;
+  _frame_start;
+  _frame_time;
+  _frame_count;
+  _fps;
 
   _cpu: CPU | null;
+  _ppu: PPU | null;
 
   constructor() {
     this._r = {
@@ -14,16 +23,19 @@ export class Timer {
       tma: 0,
       tac: 0,
     };
+    this._start_time = new Date();
+    this._frame_start = new Date();
+    this._frame_time = new Date();
+    this._frame_count = 0;
+    this._fps = 0;
     this._ticks = 0;
     this._cpu = null;
+    this._ppu = null;
   }
 
-  init(cpu: CPU) {
+  init(cpu: CPU, ppu: PPU) {
     this._cpu = cpu;
-  }
-
-  reset() {
-    this._r.div = 0xac00;
+    this._ppu = ppu;
   }
 
   handleInterrupt() {
@@ -31,15 +43,37 @@ export class Timer {
       throw new Error("CPU Error: Timer is not connected to the CPU.");
     }
 
-    this._cpu.writeRegister(REGISTER.I, this._cpu.readRegister(REGISTER.I) | INTERRUPT_TYPE.TIMER);
+    this._cpu.requestInterrupt(INTERRUPT_TYPE.TIMER);
+  }
+
+  async calcFPS() {
+    const frameDelta = this._start_time.getMilliseconds() - this._frame_time.getMilliseconds();
+    if (frameDelta < FRAME_RATE) {
+      await sleep(FRAME_RATE - frameDelta);
+    }
+
+    if (this._start_time.getMilliseconds() - this._frame_start.getMilliseconds() >= 1000) {
+      this._fps = this._frame_count;
+      this._frame_start = new Date();
+      this._frame_count = 0;
+    }
+
+    this._frame_count += 1;
+    this._frame_time = new Date();
   }
 
   cycle(val: number) {
-    const n = val * 4;
+    if (!this._ppu) {
+      throw new Error("PPU Error: Timer is not connected to the PPU.");
+    }
 
-    for (let i = 0; i < n; i++) {
-      this._ticks += 1;
-      this.tick();
+    for (let i = 0; i < val; i++) {
+      for (let n = 0; n < 4; n++) {
+        this._ticks += 1;
+        this.tick();
+        this._ppu.step();
+      }
+      this._ppu.dmaStep();
     }
   }
 

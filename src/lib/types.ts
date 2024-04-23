@@ -120,6 +120,33 @@ export enum INTERRUPT_TYPE {
   JOYPAD = 16,
 }
 
+//PPU
+export enum PPU_MODE {
+  OAM,
+  VRAM,
+  HBLANK,
+  VBLANK,
+}
+
+export enum PIXEL_FETCH_STATE {
+  TILE,
+  DATA0,
+  DATA1,
+  IDLE,
+  PUSH,
+}
+
+export interface LinkedData {
+  value: number;
+  next?: LinkedData;
+}
+
+export interface LinkedList {
+  head?: LinkedData;
+  tail?: LinkedData;
+  size: number;
+}
+
 //General
 export type Bit = 0 | 1;
 

@@ -1,19 +1,12 @@
-import { Emulator } from "./emulator/emulator";
-import { Context } from "./lib/types";
+import { Emulator } from "./emulator";
 
 function main() {
   const input = document.querySelector(".rom-input") as HTMLInputElement;
   const startStop = document.querySelector(".emu-start-stop") as HTMLButtonElement;
   const step = document.querySelector(".emu-step") as HTMLButtonElement;
-  const statusContainer = document.querySelector(".status-container") as HTMLDivElement;
-  const contextContainer = document.querySelector(".context-container") as HTMLDivElement;
+  const stepOver = document.querySelector(".emu-step-over") as HTMLButtonElement;
 
   const emulator = new Emulator();
-
-  // const emulator = new Worker(new URL("./emulator/index.ts", import.meta.url), {
-  //   name: "emulator",
-  //   type: "module",
-  // });
 
   input.addEventListener("change", (event) => {
     const files = (event.target as HTMLInputElement).files;
@@ -26,7 +19,16 @@ function main() {
 
   startStop.addEventListener("click", (event) => {
     event.preventDefault();
-    emulator.run();
+
+    if (emulator._running) {
+      if (emulator._paused) {
+        emulator._paused = false;
+      } else {
+        emulator._paused = true;
+      }
+    } else {
+      emulator.run();
+    }
     switch (startStop.innerText) {
       case "start":
         startStop.innerText = "stop";
@@ -37,24 +39,15 @@ function main() {
     }
   });
 
-  // step.addEventListener("click", (event) => {
-  //   event.preventDefault();
-  //   emulator.postMessage({ action: "step" });
-  // });
+  step.addEventListener("click", (event) => {
+    event.preventDefault();
+    emulator.step();
+  });
 
-  // emulator.onmessage = function (event) {
-  //   const { status, context, debug }: { status: string; context: Context } = event.data;
-
-  //   const statusLine = document.createElement("p");
-  //   statusLine.innerText = status;
-  //   statusLine.classList.add("status");
-  //   statusContainer.appendChild(statusLine);
-
-  //   const contextLine = document.createElement("p");
-  //   contextLine.innerText = `A: ${context.a} F: ${context.f} B: ${context.b} C: ${context.c} D: ${context.d} E: ${context.e} H: ${context.h} L: ${context.l} AF: ${context.af} BC: ${context.bc} DE: ${context.de} HL: ${context.hl} SP: ${context.sp} FLAGS: [C: ${context.flags.c}, H: ${context.flags.h}, N: ${context.flags.n}, Z: ${context.flags.z}]`;
-  //   contextLine.classList.add("status");
-  //   contextContainer.appendChild(contextLine);
-  // };
+  stepOver.addEventListener("click", (event) => {
+    event.preventDefault();
+    emulator.stepOver();
+  });
 }
 
 document.addEventListener("DOMContentLoaded", function () {

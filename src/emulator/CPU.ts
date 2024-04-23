@@ -9,7 +9,7 @@ import {
   INTERRUPT_TYPE,
   REGISTER,
 } from "../lib/types";
-import { getBit, instructionToString, setBit } from "../lib/utils";
+import { getBit, setBit } from "../lib/utils";
 import { MMU } from "./mmu";
 import { Timer } from "./timer";
 
@@ -62,26 +62,6 @@ export class CPU {
     this.writeRegister(REGISTER.BC, 0x0013);
     this.writeRegister(REGISTER.DE, 0x00d8);
     this.writeRegister(REGISTER.HL, 0x014d);
-    this._timer._r.div = 0xabcc;
-  }
-
-  reset() {
-    this._r.pc = 0x100;
-    this._r.sp = 0xfffe;
-    this.writeRegister(REGISTER.AF, 0x01b0);
-    this.writeRegister(REGISTER.BC, 0x0013);
-    this.writeRegister(REGISTER.DE, 0x00d8);
-    this.writeRegister(REGISTER.HL, 0x014d);
-    this._r.ie = 0;
-    this._r.i = 0;
-    this._fetched_data = 0;
-    this._is_memory_destination = false;
-    this._memory_destination = 0;
-    this._current_opcode = 0;
-    this._current_instruction = {} as Instruction;
-    this._interrupt_me = false;
-    this._enabling_interrupt_me = false;
-    this._halted = false;
     this._timer._r.div = 0xabcc;
   }
 
@@ -303,7 +283,6 @@ export class CPU {
   }
 
   setFlags({ c, h, n, z }: { c?: Bit; h?: Bit; n?: Bit; z?: Bit }) {
-    // console.log("SET FLAGS:", c, h, n, z);
     if (c !== undefined) this._r.f = setBit({ n: this._r.f, bit: 4, val: c });
 
     if (h !== undefined) this._r.f = setBit({ n: this._r.f, bit: 5, val: h });
@@ -530,40 +509,49 @@ export class CPU {
   step() {
     if (!this._halted) {
       try {
-        const pc = this._r.pc;
         this.fetchInstruction();
         this._timer.cycle(1);
         this.fetchData();
-        // const status = `PC: ${pc.toString(16)}, OPCODE: ${this._current_opcode.toString(
-        //   16
-        // )}, ${instructionToString(this._current_instruction, this._fetched_data)}`;
-        // postMessage({
-        //   status,
-        //   context: {
-        //     a: this._r.a.toString(16),
-        //     f: this._r.f.toString(16),
-        //     b: this._r.b.toString(16),
-        //     c: this._r.c.toString(16),
-        //     d: this._r.d.toString(16),
-        //     e: this._r.e.toString(16),
-        //     h: this._r.h.toString(16),
-        //     l: this._r.l.toString(16),
-        //     af: this.readRegister(REGISTER.AF).toString(16),
-        //     bc: this.readRegister(REGISTER.BC).toString(16),
-        //     de: this.readRegister(REGISTER.DE).toString(16),
-        //     hl: this.readRegister(REGISTER.HL).toString(16),
-        //     sp: this._r.sp.toString(16),
-        //     flags: {
-        //       c: this.getCFlag(),
-        //       h: this.getHFlag(),
-        //       n: this.getNFlag(),
-        //       z: this.getZFlag(),
-        //     },
-        //   } as Context,
-        // });
-        // this._mmu.debugUpdate();
-        // this._mmu.debugPrint();
         this.execute();
+      } catch (error) {
+        console.log(error);
+        return false;
+      }
+    } else {
+      this._timer.cycle(1);
+      if (this._r.i) {
+        this._halted = false;
+      }
+    }
+
+    if (this._interrupt_me) {
+      try {
+        this.handleInterrupt();
+      } catch (error) {
+        console.log(error);
+        return false;
+      }
+      this._enabling_interrupt_me = false;
+    }
+
+    if (this._enabling_interrupt_me) {
+      this._interrupt_me = true;
+    }
+
+    return true;
+  }
+
+  stepOver() {
+    if (!this._halted) {
+      try {
+        this.fetchInstruction();
+        this._timer.cycle(1);
+        if (this._current_instruction.type !== INSTRUCTION_TYPE.RET) {
+          this.fetchData();
+          this.execute();
+        } else {
+          return false;
+        }
       } catch (error) {
         console.log(error);
         return false;
@@ -619,6 +607,10 @@ export class CPU {
     } else if (this.checkInterrupt(INTERRUPT_TYPE.JOYPAD)) {
       this.callInterrupt(0x60, INTERRUPT_TYPE.JOYPAD);
     }
+  }
+
+  requestInterrupt(type: INTERRUPT_TYPE) {
+    this.writeRegister(REGISTER.I, this.readRegister(REGISTER.I) | type);
   }
 
   NOP() {
@@ -742,9 +734,10 @@ export class CPU {
       throw Error("Execution Error: No parameter supplied.");
     }
     if (this.checkCondition()) {
-      this._r.pc = this._current_instruction.param;
       this.stackPush16(this._r.pc);
-      this._timer.cycle(3);
+      this._timer.cycle(2);
+      this._r.pc = this._current_instruction.param;
+      this._timer.cycle(1);
     }
   }
 
@@ -804,21 +797,20 @@ export class CPU {
     let h = (r1 & 0xf) + (i & 0xf) >= 0x10;
     let c = (r1 & 0xff) + (i & 0xff) >= 0x100;
 
-    const is16bit = this._current_instruction.r2! >= REGISTER.AF;
+    const is16bit = this._current_instruction.r1! >= REGISTER.AF;
 
-    if (this._current_instruction.r2 === REGISTER.SP) {
+    if (this._current_instruction.r1 === REGISTER.SP) {
       this._timer.cycle(1);
       z = false;
     } else if (is16bit) {
       this._timer.cycle(1);
       z = null;
       h = (r1 & 0xfff) + (i & 0xfff) >= 0x1000;
-
       c = r1 + i >= 0x10000;
     }
 
-    this.writeRegister(this._current_instruction.r1!, val);
-    this.setFlags({ c: c ? 1 : 0, h: h ? 1 : 0, n: 0, z: z ? 1 : 0 });
+    this.writeRegister(this._current_instruction.r1!, val & 0xffff);
+    this.setFlags({ c: c ? 1 : 0, h: h ? 1 : 0, n: 0, z: z === null ? undefined : !!z ? 1 : 0 });
   }
 
   ADC() {
@@ -839,27 +831,27 @@ export class CPU {
     const r1 = this.readRegister(this._current_instruction.r1!);
     const i = this._fetched_data;
     const val = r1 - i;
-    this.writeRegister(this._current_instruction.r1!, val & 0xff);
     this.setFlags({
       c: val < 0 ? 1 : 0,
       h: (r1 & 0xf) + (i & 0xf) < 0 ? 1 : 0,
       n: 1,
-      z: (val & 0xff) === 0 ? 1 : 0,
+      z: val === 0 ? 1 : 0,
     });
+    this.writeRegister(this._current_instruction.r1!, val);
   }
 
   SBC() {
     const r1 = this.readRegister(this._current_instruction.r1!);
     const i = this._fetched_data;
     const c = this.getCFlag();
-    const val = r1 - i - c;
-    this.writeRegister(this._current_instruction.r1!, val & 0xff);
+    const val = r1 - i + c;
     this.setFlags({
       c: val < 0 ? 1 : 0,
       h: (r1 & 0xf) - (i & 0xf) - c < 0 ? 1 : 0,
       n: 1,
-      z: (val & 0xff) === 0 ? 1 : 0,
+      z: val === 0 ? 1 : 0,
     });
+    this.writeRegister(this._current_instruction.r1!, val);
   }
 
   AND() {
@@ -943,11 +935,19 @@ export class CPU {
         return;
       case 2:
         //RES
-        this.writeRegister(reg, setBit({ n: val, bit, val: 0 }));
+        if (reg === REGISTER.HL) {
+          this._mmu.write(this.readRegister(reg), setBit({ n: val, bit, val: 0 }));
+        } else {
+          this.writeRegister(reg, setBit({ n: val, bit, val: 0 }));
+        }
         return;
       case 3:
         //SET
-        this.writeRegister(reg, setBit({ n: val, bit, val: 1 }));
+        if (reg === REGISTER.HL) {
+          this._mmu.write(this.readRegister(reg), setBit({ n: val, bit, val: 1 }));
+        } else {
+          this.writeRegister(reg, setBit({ n: val, bit, val: 1 }));
+        }
         return;
     }
 
@@ -960,7 +960,11 @@ export class CPU {
           result |= 1;
           c = 1;
         }
-        this.writeRegister(reg, result);
+        if (reg === REGISTER.HL) {
+          this._mmu.write(this.readRegister(reg), result);
+        } else {
+          this.writeRegister(reg, result);
+        }
         this.setFlags({ c, h: 0, n: 0, z: result === 0 ? 1 : 0 });
         return;
       }
@@ -968,7 +972,11 @@ export class CPU {
         //RRC
         let result = val >> 1;
         result |= val << 7;
-        this.writeRegister(reg, result);
+        if (reg === REGISTER.HL) {
+          this._mmu.write(this.readRegister(reg), result);
+        } else {
+          this.writeRegister(reg, result);
+        }
         this.setFlags({ c: val & 1 ? 1 : 0, h: 0, n: 0, z: result === 0 ? 1 : 0 });
         return;
       }
@@ -976,7 +984,11 @@ export class CPU {
         //RL
         let result = val << 1;
         result |= this.getCFlag();
-        this.writeRegister(reg, result);
+        if (reg === REGISTER.HL) {
+          this._mmu.write(this.readRegister(reg), result);
+        } else {
+          this.writeRegister(reg, result);
+        }
         this.setFlags({ c: !!(val & 0x80) ? 1 : 0, h: 0, n: 0, z: result === 0 ? 1 : 0 });
         return;
       }
@@ -984,35 +996,56 @@ export class CPU {
         //RR
         let result = val >> 1;
         result |= this.getCFlag() << 7;
-        this.writeRegister(reg, result);
+        if (reg === REGISTER.HL) {
+          this._mmu.write(this.readRegister(reg), result);
+        } else {
+          this.writeRegister(reg, result);
+        }
         this.setFlags({ c: val & 1 ? 1 : 0, h: 0, n: 0, z: result === 0 ? 1 : 0 });
         return;
       }
       case 4: {
         //SLA
         let result = val << 1;
-        this.writeRegister(reg, result);
+        if (reg === REGISTER.HL) {
+          this._mmu.write(this.readRegister(reg), result);
+        } else {
+          this.writeRegister(reg, result);
+        }
         this.setFlags({ c: !!(val & 0x80) ? 1 : 0, h: 0, n: 0, z: result === 0 ? 1 : 0 });
         return;
       }
       case 5: {
         //SRA
         let result = val >> 1;
-        this.writeRegister(reg, result);
-        this.setFlags({ c: 0, h: 0, n: 0, z: result === 0 ? 1 : 0 });
+        result = (result & 0x80) << 1;
+        if (reg === REGISTER.HL) {
+          this._mmu.write(this.readRegister(reg), result);
+        } else {
+          this.writeRegister(reg, result);
+        }
+        this.setFlags({ c: val & 1 ? 1 : 0, h: 0, n: 0, z: result === 0 ? 1 : 0 });
         return;
       }
       case 6: {
         //SWAP
         let result = ((val & 0xf0) >> 4) | ((val & 0xf) << 4);
-        this.writeRegister(reg, result);
+        if (reg === REGISTER.HL) {
+          this._mmu.write(this.readRegister(reg), result);
+        } else {
+          this.writeRegister(reg, result);
+        }
         this.setFlags({ c: 0, h: 0, n: 0, z: result === 0 ? 1 : 0 });
         return;
       }
       case 7: {
         //SRL
         let result = val >> 1;
-        this.writeRegister(reg, result);
+        if (reg === REGISTER.HL) {
+          this._mmu.write(this.readRegister(reg), result);
+        } else {
+          this.writeRegister(reg, result);
+        }
         this.setFlags({ c: val & 1 ? 1 : 0, h: 0, n: 0, z: result === 0 ? 1 : 0 });
         return;
       }

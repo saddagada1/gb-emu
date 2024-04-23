@@ -16,6 +16,21 @@ export function setBit({ n, bit, val }: { n: number; bit: number; val: Bit }) {
   }
 }
 
+export function getColour(code: number) {
+  switch (code) {
+    case 0xffffff:
+      return "#ffffff";
+    case 0xaaaaaa:
+      return "#aaaaaa";
+    case 0x555555:
+      return "#555555";
+    case 0x000000:
+      return "#000000";
+    default:
+      return "#000000";
+  }
+}
+
 export function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
