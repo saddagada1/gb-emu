@@ -18,13 +18,13 @@ export function setBit({ n, bit, val }: { n: number; bit: number; val: Bit }) {
 
 export function getColour(code: number) {
   switch (code) {
-    case 0xffffff:
+    case 0xffffffff:
       return "#ffffff";
-    case 0xaaaaaa:
+    case 0xffaaaaaa:
       return "#aaaaaa";
-    case 0x555555:
+    case 0xff555555:
       return "#555555";
-    case 0x000000:
+    case 0xff000000:
       return "#000000";
     default:
       return "#000000";

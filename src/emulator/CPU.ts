@@ -541,17 +541,16 @@ export class CPU {
     return true;
   }
 
-  stepOver() {
+  stepOver(pc: number) {
     if (!this._halted) {
       try {
-        this.fetchInstruction();
-        this._timer.cycle(1);
-        if (this._current_instruction.type !== INSTRUCTION_TYPE.RET) {
-          this.fetchData();
-          this.execute();
-        } else {
+        if (this._r.pc === pc) {
           return false;
         }
+        this.fetchInstruction();
+        this._timer.cycle(1);
+        this.fetchData();
+        this.execute();
       } catch (error) {
         console.log(error);
         return false;
@@ -652,7 +651,7 @@ export class CPU {
   }
 
   LDH() {
-    if (this._current_instruction.r1 == REGISTER.A) {
+    if (this._current_instruction.r1 === REGISTER.A) {
       this.writeRegister(this._current_instruction.r1, this._mmu.read(0xff00 | this._fetched_data));
     } else {
       this._mmu.write(this._memory_destination, this._r.a);
@@ -911,9 +910,9 @@ export class CPU {
       REGISTER.A,
     ];
     const opcode = this._fetched_data;
-    const reg = registers[opcode & 0x07];
-    const bit = (opcode >> 3) & 0x07;
-    const op = (opcode >> 6) & 0x03;
+    const reg = registers[opcode & 0b111];
+    const bit = (opcode >> 3) & 0b111;
+    const op = (opcode >> 6) & 0b11;
 
     let val = this.readRegister(reg);
 

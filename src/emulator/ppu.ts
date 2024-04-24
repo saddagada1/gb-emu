@@ -27,15 +27,15 @@ export class PPU {
 
   constructor(cpu: CPU, mmu: MMU, timer: Timer) {
     this._r = {
-      lcdc: 0,
+      lcdc: 0x91,
       stat: 0,
       ly: 0,
       lyc: 0,
-      bgp: 0,
+      bgp: 0xfc,
       bgc: Pallette,
-      obp0: 0,
+      obp0: 0xff,
       obc0: Pallette,
-      obp1: 0,
+      obp1: 0xff,
       obc1: Pallette,
       scx: 0,
       scy: 0,
@@ -80,31 +80,30 @@ export class PPU {
   }
 
   getLCDC(bit: number) {
-    // LCD & PPU enable: 0 = Off; 1 = On
-    // Window tile map area: 0 = 9800–9BFF; 1 = 9C00–9FFF
-    // Window enable: 0 = Off; 1 = On
-    // BG & Window tile data area: 0 = 8800–97FF; 1 = 8000–8FFF
-    // BG tile map area: 0 = 9800–9BFF; 1 = 9C00–9FFF
-    // OBJ size: 0 = 8×8; 1 = 8×16
-    // OBJ enable: 0 = Off; 1 = On
-    // BG & Window enable / priority [Different meaning in CGB Mode]: 0 = Off; 1 = On
-
     switch (bit) {
       case 0:
+        //BGW Enable
         return getBit({ n: this._r.lcdc, bit: 0 });
       case 1:
+        //OBJ Enable
         return getBit({ n: this._r.lcdc, bit: 1 });
       case 2:
-        return !!getBit({ n: this._r.lcdc, bit: 2 }) ? 16 : 8;
+        //OBJ Height
+        return getBit({ n: this._r.lcdc, bit: 2 }) ? 16 : 8;
       case 3:
-        return !!getBit({ n: this._r.lcdc, bit: 3 }) ? 0x9c00 : 0x9800;
+        //BG Map Area
+        return getBit({ n: this._r.lcdc, bit: 3 }) ? 0x9c00 : 0x9800;
       case 4:
-        return !!getBit({ n: this._r.lcdc, bit: 4 }) ? 0x8000 : 0x8800;
+        //BGW Data Area
+        return getBit({ n: this._r.lcdc, bit: 4 }) ? 0x8000 : 0x8800;
       case 5:
+        //WIN Enable
         return getBit({ n: this._r.lcdc, bit: 5 });
       case 6:
-        return !!getBit({ n: this._r.lcdc, bit: 6 }) ? 0x9c00 : 0x9800;
+        //WIN Map Area
+        return getBit({ n: this._r.lcdc, bit: 6 }) ? 0x9c00 : 0x9800;
       case 7:
+        //LCD Enable
         return getBit({ n: this._r.lcdc, bit: 7 });
       default:
         return 0;
@@ -112,29 +111,25 @@ export class PPU {
   }
 
   getStatus(bit: number) {
-    // LYC int select (Read/Write): If set, selects the LYC == LY condition for the STAT interrupt.
-    // Mode 2 int select (Read/Write): If set, selects the Mode 2 condition for the STAT interrupt.
-    // Mode 1 int select (Read/Write): If set, selects the Mode 1 condition for the STAT interrupt.
-    // Mode 0 int select (Read/Write): If set, selects the Mode 0 condition for the STAT interrupt.
-    // LYC == LY (Read-only): Set when LY contains the same value as LYC; it is constantly updated.
-    // PPU mode (Read-only): Indicates the PPU’s current status.
-
     switch (bit) {
       case 0:
       case 1:
-        const low = getBit({ n: this._r.stat, bit: 0 });
-        const high = getBit({ n: this._r.stat, bit: 1 });
-        const val = (high << 8) | low;
-        return val;
+        //Mode
+        return this._r.stat & 0b11;
       case 2:
+        //LYC == LY
         return getBit({ n: this._r.stat, bit: 2 });
       case 3:
+        //HBLANK INT
         return getBit({ n: this._r.stat, bit: 3 });
       case 4:
+        //VBLANK INT
         return getBit({ n: this._r.stat, bit: 4 });
       case 5:
+        //OAM INT
         return getBit({ n: this._r.stat, bit: 5 });
       case 6:
+        //LYC INT
         return getBit({ n: this._r.stat, bit: 6 });
       default:
         return 0;
@@ -146,9 +141,7 @@ export class PPU {
   }
 
   getMode() {
-    const low = getBit({ n: this._r.stat, bit: 0 });
-    const high = getBit({ n: this._r.stat, bit: 1 });
-    const mode = (high << 8) | low;
+    const mode = this.getStatus(0);
     switch (mode) {
       case 0:
         return PPU_MODE.OAM;
@@ -164,7 +157,7 @@ export class PPU {
   }
 
   setMode(val: PPU_MODE) {
-    this._r.stat &= ~0x02;
+    this._r.stat &= ~0b11;
     this._r.stat |= val;
   }
 
@@ -192,19 +185,18 @@ export class PPU {
     if (!this._pixels.list.head) {
       this._pixels.list.head = this._pixels.list.tail = data;
     } else {
+      this._pixels.list.tail!.next = data;
       this._pixels.list.tail = data;
-      this._pixels.list.tail.next = data;
     }
-
     this._pixels.list.size += 1;
   }
 
   pixelsPop() {
-    if (this._pixels.list.size <= 0 || !this._pixels.list.head) {
+    if (this._pixels.list.size <= 0) {
       throw new Error("PPU Error: No Pixels to Access");
     }
 
-    const data = this._pixels.list.head;
+    const data = this._pixels.list.head!;
     this._pixels.list.head = data.next;
     this._pixels.list.size -= 1;
 
@@ -247,29 +239,29 @@ export class PPU {
 
         this._pixels.state = PIXEL_FETCH_STATE.DATA0;
         this._pixels.fetchX += 8;
-        return;
+        break;
       case PIXEL_FETCH_STATE.DATA0:
         this._pixels.bgwData[1] = this._mmu.read(
           this.getLCDC(4) + this._pixels.bgwData[0] * 16 + this._pixels.tileY
         );
 
         this._pixels.state = PIXEL_FETCH_STATE.DATA1;
-        return;
+        break;
       case PIXEL_FETCH_STATE.DATA1:
         this._pixels.bgwData[2] = this._mmu.read(
           this.getLCDC(4) + this._pixels.bgwData[0] * 16 + this._pixels.tileY + 1
         );
 
         this._pixels.state = PIXEL_FETCH_STATE.IDLE;
-        return;
+        break;
       case PIXEL_FETCH_STATE.IDLE:
         this._pixels.state = PIXEL_FETCH_STATE.PUSH;
-        return;
+        break;
       case PIXEL_FETCH_STATE.PUSH:
         if (this.pipelineAdd()) {
           this._pixels.state = PIXEL_FETCH_STATE.TILE;
         }
-        return;
+        break;
     }
   }
 
@@ -289,7 +281,7 @@ export class PPU {
   pipelineProcess() {
     this._pixels.mapY = this._r.ly + this._r.scy;
     this._pixels.mapX = this._pixels.fetchX + this._r.scx;
-    this._pixels.tileY = (this._pixels.mapY % 8) * 2;
+    this._pixels.tileY = ((this._r.ly + this._r.scy) % 8) * 2;
 
     if (!(this._line_ticks & 1)) {
       this.pipelineFetch();
@@ -299,7 +291,9 @@ export class PPU {
   }
 
   pipelineReset() {
-    this._pixels.list = { size: 0 };
+    while (this._pixels.list.size > 0) {
+      this.pixelsPop();
+    }
   }
 
   step() {
@@ -317,7 +311,7 @@ export class PPU {
             index: 0,
           };
         }
-        return;
+        break;
       case PPU_MODE.VRAM:
         this.pipelineProcess();
         if (this._pixels.pushedX >= XRES) {
@@ -327,7 +321,7 @@ export class PPU {
             this._cpu.requestInterrupt(INTERRUPT_TYPE.LCD_STAT);
           }
         }
-        return;
+        break;
       case PPU_MODE.VBLANK:
         if (this._line_ticks >= TICKS_PER_LINE) {
           this.incrementLY();
@@ -339,7 +333,7 @@ export class PPU {
 
           this._line_ticks = 0;
         }
-        return;
+        break;
       case PPU_MODE.HBLANK:
         if (this._line_ticks >= TICKS_PER_LINE) {
           this.incrementLY();
@@ -359,6 +353,7 @@ export class PPU {
 
           this._line_ticks = 0;
         }
+        break;
     }
   }
 
@@ -389,22 +384,22 @@ export class PPU {
   updatePalette(val: number, palette: number) {
     switch (palette) {
       case 0:
-        this._r.bgc[0] = Pallette[val & 0x02];
-        this._r.bgc[1] = Pallette[(val >> 2) & 0x02];
-        this._r.bgc[2] = Pallette[(val >> 4) & 0x02];
-        this._r.bgc[3] = Pallette[(val >> 6) & 0x02];
+        this._r.bgc[0] = Pallette[val & 0b11];
+        this._r.bgc[1] = Pallette[(val >> 2) & 0b11];
+        this._r.bgc[2] = Pallette[(val >> 4) & 0b11];
+        this._r.bgc[3] = Pallette[(val >> 6) & 0b11];
         return;
       case 1:
-        this._r.obc0[0] = Pallette[val & 0x02];
-        this._r.obc0[1] = Pallette[(val >> 2) & 0x02];
-        this._r.obc0[2] = Pallette[(val >> 4) & 0x02];
-        this._r.obc0[3] = Pallette[(val >> 6) & 0x02];
+        this._r.obc0[0] = Pallette[val & 0b11];
+        this._r.obc0[1] = Pallette[(val >> 2) & 0b11];
+        this._r.obc0[2] = Pallette[(val >> 4) & 0b11];
+        this._r.obc0[3] = Pallette[(val >> 6) & 0b11];
         return;
       case 2:
-        this._r.obc1[0] = Pallette[val & 0x02];
-        this._r.obc1[1] = Pallette[(val >> 2) & 0x02];
-        this._r.obc1[2] = Pallette[(val >> 4) & 0x02];
-        this._r.obc1[3] = Pallette[(val >> 6) & 0x02];
+        this._r.obc1[0] = Pallette[val & 0b11];
+        this._r.obc1[1] = Pallette[(val >> 2) & 0b11];
+        this._r.obc1[2] = Pallette[(val >> 4) & 0b11];
+        this._r.obc1[3] = Pallette[(val >> 6) & 0b11];
         return;
     }
   }
@@ -461,10 +456,10 @@ export class PPU {
         this.updatePalette(val, 0);
         return;
       case 0xff48:
-        this.updatePalette(val, 1);
+        this.updatePalette(val & 0b11111100, 1);
         return;
       case 0xff49:
-        this.updatePalette(val, 2);
+        this.updatePalette(val & 0b11111100, 2);
         return;
     }
   }
@@ -508,7 +503,7 @@ export class PPU {
 
         this._renderer.fillStyle = getColour(code);
 
-        this._renderer.fillRect(x, y, SCALE, SCALE);
+        this._renderer.fillRect(x + 700, y, SCALE, SCALE);
       }
     }
   }
@@ -519,8 +514,9 @@ export class PPU {
         const xPos = x * SCALE;
         const yPos = y * SCALE;
         const code = this._buffer[x + y * XRES];
+        const colour = getColour(code);
 
-        this._renderer.fillStyle = getColour(code);
+        this._renderer.fillStyle = colour;
 
         this._renderer.fillRect(xPos, yPos, SCALE, SCALE);
       }
@@ -547,21 +543,24 @@ export class PPU {
   drawConsole(status: string, context: string) {
     this._renderer.fillStyle = "#000000";
     this._renderer.font = "25px Arial";
-    this._renderer.fillText(status, 700, 50);
+    this._renderer.fillText(status, 0, 700);
 
     this._renderer.font = "25px Arial";
-    this._renderer.fillText(context, 700, 100);
-
-    this._renderer.font = "25px Arial";
-    this._renderer.fillText(this._timer._fps.toString(), 700, 200);
+    this._renderer.fillText(context, 0, 800);
 
     this._renderer.font = "20px Arial";
-    this._renderer.fillText(this._buffer.toString(), 700, 300);
+    this._renderer.fillText(this._buffer.toString().substring(0, 250), 0, 900);
+    this._renderer.fillText(this._buffer.toString().substring(250, 500), 0, 1000);
+    this._renderer.fillText(this._buffer.toString().substring(500, 750), 0, 1100);
+    this._renderer.fillText(this._buffer.toString().substring(750, 1000), 0, 1200);
+    this._renderer.fillText(this._buffer.toString().substring(1000, 1250), 0, 1300);
+    this._renderer.fillText(this._buffer.toString().substring(1250, 1500), 0, 1400);
   }
 
   draw(status: string, context: string) {
     this._renderer.clearRect(0, 0, this._canvas.width, this._canvas.height);
     this.drawScreen();
+    this.drawDebug();
     this.drawConsole(status, context);
   }
 }

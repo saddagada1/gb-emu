@@ -60,8 +60,14 @@ export class Emulator {
         n: this._cpu.getNFlag(),
         z: this._cpu.getZFlag(),
       },
+      ie: this._cpu._r.ie.toString(16),
+      i: this._cpu._r.i.toString(16),
+      lcdc: this._ppu._r.lcdc.toString(16),
+      stat: this._ppu._r.stat.toString(16),
+      ly: this._ppu._r.ly.toString(16),
+      div: this._timer._r.div.toString(16),
     };
-    return `A: ${context.a} F: ${context.f} B: ${context.b} C: ${context.c} D: ${context.d} E: ${context.e} H: ${context.h} L: ${context.l} AF: ${context.af} BC: ${context.bc} DE: ${context.de} HL: ${context.hl} SP: ${context.sp} FLAGS: [C: ${context.flags.c}, H: ${context.flags.h}, N: ${context.flags.n}, Z: ${context.flags.z}]`;
+    return `A: ${context.a} F: ${context.f} B: ${context.b} C: ${context.c} D: ${context.d} E: ${context.e} H: ${context.h} L: ${context.l} AF: ${context.af} BC: ${context.bc} DE: ${context.de} HL: ${context.hl} SP: ${context.sp} FLAGS: [C: ${context.flags.c}, H: ${context.flags.h}, N: ${context.flags.n}, Z: ${context.flags.z}] IE: ${context.ie} I: ${context.i} LCDC: ${context.lcdc} STAT: ${context.stat} LY: ${context.ly} DIV: ${context.div}`;
   }
 
   async load(rom: File) {
@@ -79,16 +85,9 @@ export class Emulator {
   }
 
   stepOver() {
-    this.break = false;
-    this._ppu.draw(this.getStatus(), this.getContext());
-    for (let i = 0; i < 1000; i++) {
-      if (!this._cpu.stepOver()) {
-        this.break = true;
-        break;
-      }
-    }
-    if (!this.break) {
-      requestAnimationFrame(this.stepOver.bind(this));
+    for (let i = 0; i < 100; i++) {
+      this._cpu.step();
+      this._ppu.draw(this.getStatus(), this.getContext());
     }
   }
 

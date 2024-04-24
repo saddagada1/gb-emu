@@ -82,20 +82,20 @@ export class Timer {
     this._r.div += 1;
     let update = false;
 
-    switch (this._r.tac & 0x03) {
-      case 0x00:
+    switch (this._r.tac & 0b11) {
+      case 0b00:
         update = !!(prev & (1 << 9) && !(this._r.div & (1 << 9)));
         break;
 
-      case 0x01:
+      case 0b01:
         update = !!(prev & (1 << 3) && !(this._r.div & (1 << 3)));
         break;
 
-      case 0x02:
+      case 0b10:
         update = !!(prev & (1 << 5) && !(this._r.div & (1 << 5)));
         break;
 
-      case 0x03:
+      case 0b11:
         update = !!(prev & (1 << 7) && !(this._r.div & (1 << 7)));
         break;
     }
